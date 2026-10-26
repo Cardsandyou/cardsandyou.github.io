@@ -428,3 +428,14 @@ section[id],.system-card[id]{scroll-margin-top:84px}
 .brand-logo{width:42px;height:42px;border-radius:50%;object-fit:cover;flex:none;box-shadow:0 0 0 1px var(--gold)}
 @media(min-width:701px){header .brand-logo{width:52px;height:52px}}
 .footer-brand .brand-logo{width:52px;height:52px}
+
+/* 「更多點數系統整理中」佔位卡片 */
+.system-card.coming{background:transparent;border:1px dashed #c9d6c7;display:flex;flex-direction:column;cursor:default}
+.system-card.coming:hover{transform:none;box-shadow:none;border-color:#c9d6c7}
+.system-card.coming .cardtopline{letter-spacing:.14em}
+.system-card.coming .coming-ico{background:#efeee4;color:#a8853f;font-size:26px;font-weight:400}
+.system-card.coming h3{color:#5d7466}
+.system-card.coming p{color:#8b9a8d}
+.system-card.coming footer{margin-top:auto;border-top:1px dashed #d8dfd1;color:#a8853f;background:transparent}
+.cards > .coming:nth-child(2):last-child{grid-column:span 2}
+@media(max-width:700px){.cards > .coming:nth-child(2):last-child{grid-column:auto}}
