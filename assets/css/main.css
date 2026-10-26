@@ -382,6 +382,7 @@ section[id],.system-card[id]{scroll-margin-top:84px}
 .cmp-diff{display:inline-block;margin-left:8px;padding:0 8px;border-radius:999px;background:#f6e9e4;color:#a4523f;font-size:12px;font-weight:700}
 .cmp.nocost{opacity:.7}
 .cmp-bar.none span{color:#9aa79c}
+.cmp-info b em.tag-ok{background:linear-gradient(90deg,#1f5a45,#a8853f);color:#fbf6e6;box-shadow:0 0 0 1px #c7a45a inset}
 
 /* ===== Publii 主題專用 ===== */
 .articles article{position:relative}

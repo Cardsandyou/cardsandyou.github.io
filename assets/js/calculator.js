@@ -555,6 +555,7 @@ function renderCompare() {
   const per10k = c => 10000 / c.perMile;
   const maxSpeed = Math.max(...compare.map(per10k), 1), maxCost = Math.max(...costRows.map(r => r.cost.total), 1);
   const fastest = compare.length > 1 ? Math.min(...compare.map(c => c.perMile)) : null;
+  const mostMiles = compare.length > 1 ? Math.max(...compare.map(c => Math.floor(c.miles))) : null;   // 「累積最多哩程」：可得哩程最多的一列
   const cheapest = costRows.length > 1 ? Math.min(...costRows.map(r => r.cost.total)) : null;
   if (mode === 'cost') rows.sort((a, b) => (a.cost ? a.cost.total : Infinity) - (b.cost ? b.cost.total : Infinity) || a.i - b.i);
   else rows.sort((a, b) => a.c.perMile - b.c.perMile || a.i - b.i);
@@ -563,7 +564,10 @@ function renderCompare() {
       c.extra ? `活動加贈 ${fmt(c.extra)} 點` : '', c.bonus ? `加成 ${fmt(c.bonus, 1)}%` : '', c.usd ? `消費 US$ ${fmt(c.spend)}` : `消費 NT$ ${fmt(c.spend)}`].filter(Boolean).join('　·　');
     const isFast = fastest != null && c.perMile === fastest, isCheap = cheapest != null && cost && cost.total === cheapest;
     const hi = mode === 'cost' ? isCheap : isFast;
-    const tags = (isCheap ? '<em class="tag-cheap">總花費最低</em>' : '') + (isFast ? '<em>累積最快</em>' : '');
+    const isMost = mostMiles != null && Math.floor(c.miles) === mostMiles;
+    const canRedeem = cost && c.miles >= c.tk.miles;                // 這組消費累積的哩程已經夠換這張機票
+    const tags = (isCheap ? '<em class="tag-cheap">總花費最低</em>' : '') + (isMost ? '<em>累積最多哩程</em>' : '')
+      + (canRedeem ? '<em class="tag-ok">恭喜！已經可換機票</em>' : '');
     const bar = mode === 'cost'
       ? (cost ? `<div class="cmp-bar"><div class="track"><i style="width:${(cost.total / maxCost * 100).toFixed(1)}%"></i></div><span>換票總成本 NT$ ${fmt(cost.total)}</span></div>`
               : '<div class="cmp-bar none"><div class="track"></div><span>未算出總成本</span></div>')
@@ -727,9 +731,9 @@ function renderTicket() {
 function ticketLine(c, cost, cheapest) {
   const t = c.tk; if (!t) return '';
   if (cost === undefined) cost = costOf(c);
-  if (!cost) return `<small class="cmp-ticket off">目標機票：${t.label}　·　兌換目標不同，不適用</small>`;
+  if (!cost) return `<small class="cmp-ticket off">目標機票：${t.label}・所需 ${fmt(t.miles)} 哩　·　兌換目標不同，不適用</small>`;
   const diff = cheapest != null && cost.total > cheapest ? `<span class="cmp-diff">比最低多 NT$ ${fmt(cost.total - cheapest)}</span>` : '';
-  return `<small class="cmp-ticket"><span class="cmp-tk-label">目標機票：${t.label}</span>換這張機票的總成本 <b>NT$ ${fmt(cost.total)}</b>${diff}<span class="cmp-ticket-sub">（消費金額 NT$ ${fmt(cost.spend)}＋稅金與燃油附加費 ${cost.tax ? 'NT$ ' + fmt(cost.tax) : '未填寫'}）</span></small>`;
+  return `<small class="cmp-ticket"><span class="cmp-tk-label">目標機票：${t.label}・所需 ${fmt(t.miles)} 哩</span>換這張機票的總成本 <b>NT$ ${fmt(cost.total)}</b>${diff}<span class="cmp-ticket-sub">（消費金額 NT$ ${fmt(cost.spend)}＋稅金與燃油附加費 ${cost.tax ? 'NT$ ' + fmt(cost.tax) : '未填寫'}）</span></small>`;
 }
 (function initTicket() {
   window.__tkReady = true;
