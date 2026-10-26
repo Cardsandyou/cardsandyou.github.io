@@ -382,8 +382,13 @@ section[id],.system-card[id]{scroll-margin-top:84px}
 .cmp-diff{display:inline-block;margin-left:8px;padding:0 8px;border-radius:999px;background:#f6e9e4;color:#a4523f;font-size:12px;font-weight:700}
 .cmp.nocost{opacity:.7}
 .cmp-bar.none span{color:#9aa79c}
-.cmp-info b em.tag-ok{background:linear-gradient(90deg,#1f5a45,#a8853f);color:#fbf6e6;box-shadow:0 0 0 1px #c7a45a inset}
 
+/* 「恭喜！已經可換機票」：金色漸層＋柔和光暈＋緩慢閃光，有慶祝感但仍在綠金色系內 */
+.cmp-info b em.tag-ok{position:relative;overflow:hidden;isolation:isolate;padding:2px 12px;background:linear-gradient(135deg,#f6e3a8 0%,#d8b25f 48%,#f2d78f 100%);color:#123d32;font-weight:800;box-shadow:0 0 0 1px #b8913f inset,0 3px 10px #c7a45a66}
+.cmp-info b em.tag-ok:before{content:"✈";margin-right:5px;font-size:12px}
+.cmp-info b em.tag-ok:after{content:"";position:absolute;top:0;bottom:0;left:-60%;width:40%;background:linear-gradient(100deg,transparent,#fffbea 50%,transparent);opacity:.9;z-index:-1;animation:tagShine 3.2s ease-in-out infinite}
+@keyframes tagShine{0%{left:-60%}55%,100%{left:130%}}
+@media(prefers-reduced-motion:reduce){.cmp-info b em.tag-ok:after{display:none}}
 /* ===== Publii 主題專用 ===== */
 .articles article{position:relative}
 .card-link{position:absolute;inset:0;z-index:1}
