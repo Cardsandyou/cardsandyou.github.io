@@ -1,3 +1,66 @@
+# 卡點遊 cardsandyou.com robots.txt
+# 名單參考 GitHub 社群維護的 ai.robots.txt 專案（2026/10）
+
+# ── AI 訓練用爬蟲（美國、歐洲等）──
+User-agent: GPTBot
+User-agent: ClaudeBot
+User-agent: anthropic-ai
+User-agent: Google-Extended
+User-agent: Applebot-Extended
+User-agent: CCBot
+User-agent: meta-externalagent
+User-agent: FacebookBot
+User-agent: cohere-training-data-crawler
+User-agent: MistralAI-Training
+User-agent: AI2Bot
+User-agent: Ai2Bot-Dolma
+User-agent: Diffbot
+User-agent: Timpibot
+User-agent: omgili
+User-agent: omgilibot
+User-agent: Webzio-Extended
+User-agent: ImagesiftBot
+User-agent: img2dataset
+User-agent: LAIONDownloader
+User-agent: YouBot
+# ── 中國 AI ──
+# DeepSeek
+User-agent: DeepSeekBot
+# 字節跳動（豆包、TikTok）
+User-agent: Bytespider
+User-agent: TikTokSpider
+User-agent: DoubaoBot
+# 百度（文心一言）
+User-agent: ERNIEBot
+User-agent: YiyanBot
+# 阿里巴巴（通義千問）
+User-agent: QwenBot
+User-agent: TongyiBot
+# 騰訊（混元）
+User-agent: Hunyuan
+# 月之暗面（Kimi）
+User-agent: KimiBot
+User-agent: MoonshotBot
+User-agent: Kimi-SearchBot
+User-agent: Kimi-User
+User-agent: Kimi-Agent
+# 智譜（ChatGLM）
+User-agent: ChatGLM-Spider
+# 華為（盤古、小藝）
+User-agent: PanguBot
+User-agent: PetalBot
+# 零一萬物
+User-agent: YiBot
+# Manus
+User-agent: Manus-User
+# ── Perplexity ──
+User-agent: PerplexityBot
+# ── xAI（Grok）──
+User-agent: GrokBot
+Disallow: /
+
+# ── 其他（Google 搜尋、Bing、ChatGPT 與 Claude 的搜尋等）照常開放 ──
 User-agent: *
 Disallow:
+
 Sitemap: https://cardsandyou.com/sitemap.xml
