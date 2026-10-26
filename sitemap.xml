@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="https://cardsandyou.github.io/sitemap.xsl"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.sitemaps.org/schemas/sitemap/0.9 http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+<url>
+<loc>https://cardsandyou.github.io/</loc>
+</url>
+<url>
+<loc>https://cardsandyou.github.io/cube-autumnevents-jal-bonus/</loc>
+<lastmod>2026-10-26T19:06:56+08:00</lastmod>
+<image:image>
+<image:loc>https://cardsandyou.github.io/media/posts/2/Qiu-Ri-You-Wen-Zhang-Feng-Mian-Fu-Shi-Hui.jpg</image:loc>
+<image:title><![CDATA[]]></image:title>
+</image:image>
+</url>
+<url>
+<loc>https://cardsandyou.github.io/qia-dian-you-shi-suanji-suan-ji-ye-mian/</loc>
+<lastmod>2026-10-26T15:31:17+08:00</lastmod>
+</url>
+</urlset>
