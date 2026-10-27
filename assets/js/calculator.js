@@ -912,6 +912,9 @@ function alignToTicket() {
 .cy-share-acts button:only-child,.cy-share-acts .wide{grid-column:1/-1}
 .cy-share-tip{margin:12px 0 0;color:#738176;font-size:12px;line-height:1.6}
 .cy-x{position:absolute;top:10px;right:10px;width:34px!important;height:34px;margin:0!important;padding:0!important;border:0!important;background:transparent!important;color:${C.green}!important;font:400 26px/1 sans-serif!important;cursor:pointer;justify-content:center}
+.cmp-restore{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:0 0 14px;padding:10px 14px;background:#f9eeda;border:1px dashed ${C.gold};color:#6b5a2e;font:500 13px "Noto Sans TC",sans-serif}
+.cmp-restore[hidden]{display:none}
+.compare .cmp-restore button{width:auto;margin:0;padding:6px 12px;border:1px solid ${C.green};background:transparent;color:${C.green};font:700 13px "Noto Sans TC",sans-serif;cursor:pointer}
 .cy-toast{position:fixed;left:50%;bottom:28px;z-index:1001;transform:translateX(-50%);padding:11px 18px;background:${C.green};color:${C.cream};border:1px solid ${C.gold};font:600 14px "Noto Sans TC",sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.25);transition:opacity .25s}
 .cy-toast[hidden]{display:none}
 @media (max-width:640px){.compare-head{flex-wrap:wrap}.cmp-acts{width:100%}.cmp-acts button{flex:1}}`;
@@ -959,6 +962,55 @@ function alignToTicket() {
   const ticketFits = r => !!(ticket && r.ok && (ticket.award.id === 'custom' || r.prog.any
     || ticket.award.match.some(k => (r.prog.name + r.prog.short).includes(k))));
 
+  /* ---- 比較區編碼：短陣列 → UTF-8 → base64url（同步，避免手機分享時失去點擊授權） ---- */
+  const clean = v => String(v == null ? '' : v).replace(/[<>&"'`\\]/g, '').slice(0, 120);
+  const n4 = v => (v == null || !isFinite(v)) ? null : Math.round(v * 1e4) / 1e4;
+  const b64u = str => btoa(unescape(encodeURIComponent(str))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const unb64u = str => decodeURIComponent(escape(atob(str.replace(/-/g, '+').replace(/_/g, '/'))));
+  function encodeCompare(list) {
+    if (!list.length) return '';
+    return b64u(JSON.stringify(list.map(c => [c.sys, c.prog, c.unit, c.ratio, n4(c.earn), n4(c.rate), n4(c.bonus), n4(c.spend), c.miles, c.perMile,
+      c.usd ? 1 : 0, c.perMileUSD, n4(c.extra), n4(c.fee), c.fixed ? 1 : 0, c.tk ? [c.tk.id, n4(c.tk.miles), n4(c.tk.tax), c.tk.label] : 0])));
+  }
+  function decodeCompare(str) {
+    try {
+      const arr = JSON.parse(unb64u(str)); if (!Array.isArray(arr)) return null;
+      const num = v => (v == null || !isFinite(+v)) ? null : +v;
+      return arr.slice(0, MAX).map(a => {
+        const perMile = num(a[9]), miles = num(a[8]);
+        if (!perMile || perMile <= 0 || miles == null) return null;
+        const t = Array.isArray(a[15]) ? a[15] : null, aw = t && AWARDS.find(x => x.id === clean(t[0]));
+        const prog = clean(a[1]);
+        return { sys: clean(a[0]), prog, unit: clean(a[2]) || '哩', ratio: clean(a[3]), earn: num(a[4]), rate: num(a[5]), bonus: num(a[6]) || 0,
+          spend: num(a[7]) || 0, miles, perMile, usd: !!a[10], perMileUSD: num(a[11]), extra: num(a[12]) || 0, fee: num(a[13]) || 0,
+          fixed: !!a[14], plan: planOf({ short: prog, name: prog }),
+          tk: t && aw ? { id: aw.id, match: aw.match, miles: num(t[1]) || 0, tax: num(t[2]) || 0, label: clean(t[3]) } : null };
+      }).filter(Boolean);
+    } catch (e) { return null; }
+  }
+  // 從分享連結帶入比較方案：讀者原本的比較先暫存，可以一鍵還原
+  const MINE = KEY + '-mine';
+  (function loadSharedCompare() {
+    const raw = new URLSearchParams(location.search).get('cmp'); if (!raw) return;
+    const rows = decodeCompare(raw); if (!rows || !rows.length) return;
+    if (compare.length && JSON.stringify(compare) !== JSON.stringify(rows)) { try { localStorage.setItem(MINE, JSON.stringify(compare)); } catch (e) {} }
+    compare = rows; save();
+    // 網址拿掉 cmp，避免重新整理時又覆蓋掉讀者之後的修改
+    try { const u = new URL(location.href); u.searchParams.delete('cmp'); history.replaceState(null, '', u.toString()); } catch (e) {}
+    renderCompare(); render();
+  })();
+  const restore = document.createElement('p');
+  restore.className = 'cmp-restore'; restore.hidden = true;
+  restore.innerHTML = '這是分享連結帶入的比較方案。<button type="button">還原我原本的比較</button>';
+  $('compare').insertBefore(restore, $('compare').children[1] || null);
+  function syncRestore() { let has = false; try { has = !!JSON.parse(localStorage.getItem(MINE) || '[]').length; } catch (e) {} restore.hidden = !has; }
+  restore.querySelector('button').addEventListener('click', () => {
+    try { compare = JSON.parse(localStorage.getItem(MINE) || '[]').slice(0, MAX); localStorage.removeItem(MINE); } catch (e) {}
+    save(); renderCompare(); render(); syncRestore(); toast('已還原你原本的比較');
+  });
+  $('clearCompare').addEventListener('click', () => { try { localStorage.removeItem(MINE); } catch (e) {} syncRestore(); });
+  syncRestore();
+
   /* ---- 分享連結 ---- */
   function shareURL() {
     const q = new URLSearchParams();
@@ -993,7 +1045,9 @@ function alignToTicket() {
       }
       if (num('tkTax')) q.set('tax', String(num('tkTax')));
     }
+    const cmp = encodeCompare(compare); if (cmp) q.set('cmp', cmp);   // 比較區的方案也一起帶過去
     q.set('from', 'share');
+    q.set('openExternalBrowser', '1');   // 在 LINE 裡點開時改用手機預設瀏覽器，才能直接分享圖片（其他 App 會忽略這個參數）
     return `${location.origin}${location.pathname}?${q.toString()}`;
   }
   function shareText(r) {
@@ -1268,7 +1322,7 @@ function alignToTicket() {
   modal.innerHTML = `<div class="cy-share-box" role="dialog" aria-modal="true" aria-labelledby="cyShareT">
     <button type="button" class="cy-x" aria-label="關閉">×</button>
     <h4 id="cyShareT">分享圖</h4><div class="cy-share-view"></div>
-    <div class="cy-share-acts"><button type="button" data-a="share">分享圖片</button><button type="button" data-a="dl">下載圖片</button>${CFG.link ? '<button type="button" data-a="link" class="alt wide">複製這組試算的連結</button>' : ''}</div>
+    <div class="cy-share-acts"><button type="button" data-a="share">分享圖片</button><button type="button" data-a="ext" class="wide">用瀏覽器開啟，直接分享圖片</button><button type="button" data-a="copy">複製圖片</button><button type="button" data-a="dl">下載圖片</button>${CFG.link ? '<button type="button" data-a="link" class="alt wide">複製這組試算的連結</button>' : ''}</div>
     <p class="cy-share-tip"></p></div>`;
   document.body.appendChild(modal);
   let cur = null, lastFocus = null;
@@ -1292,19 +1346,42 @@ function alignToTicket() {
     if (!blob) { closeModal(); toast('圖片產生失敗，請稍後再試'); return; }
     const d = new Date(), stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
     const file = new File([blob], `cardsandyou-${kind === 'cmp' ? 'compare' : 'miles'}-${stamp}.png`, { type: 'image/png' });
-    cur = { file, url: URL.createObjectURL(blob), link: shareURL(), text: kind === 'cmp' ? '我把幾種點數方案放在一起比了一下 👉' : shareText(compute()) };
+    cur = { file, blob, url: URL.createObjectURL(blob), link: shareURL(), text: kind === 'cmp' ? '我把幾種點數方案放在一起比了一下 👉' : shareText(compute()) };
     view.innerHTML = `<img src="${cur.url}" alt="${kind === 'cmp' ? '方案比較圖' : '試算結果圖'}">`;
-    const canShare = !!(navigator.canShare && navigator.canShare({ files: [file] }));
+    // 系統分享選單只在手機／平板使用：電腦版的分享選單交給 LINE、FB 等桌面程式時，常常只開啟程式卻沒有帶入圖片，
+    // 所以電腦版改成「複製圖片」，到聊天室直接貼上最穩定。
+    const canShare = touch() && !!(navigator.canShare && navigator.canShare({ files: [file] }));
+    const canCopy = !touch() && !!(navigator.clipboard && navigator.clipboard.write && window.ClipboardItem);
+    // App 內建瀏覽器（LINE、FB、IG、Threads）大多不支援直接分享圖片：LINE 可以用參數改開手機預設瀏覽器，其他 App 請讀者從選單開啟
+    const ua = navigator.userAgent || '', inLine = /\bLine\//i.test(ua), inApp = inLine || /FBAN|FBAV|FB_IAB|Instagram|Barcelona|Threads/i.test(ua);
+    const needExt = touch() && !canShare && inLine;
     modal.querySelector('[data-a="share"]').hidden = !canShare;
+    modal.querySelector('[data-a="share"]').classList.toggle('wide', canShare);
+    modal.querySelector('[data-a="ext"]').hidden = !needExt;
+    modal.querySelector('[data-a="copy"]').hidden = !canCopy;
+    modal.querySelector('[data-a="dl"]').classList.toggle('alt', canShare || needExt);
+    modal.querySelector('[data-a="dl"]').classList.toggle('wide', !canCopy);
+    const linkTip = CFG.link ? '連結請另外貼在貼文或留言裡，朋友點開就是同一組數字。' : '';
     modal.querySelector('.cy-share-tip').textContent = canShare
-      ? (CFG.link ? '可以直接分享到 IG、Threads、LINE；連結請另外貼在貼文或留言裡。' : '可以直接分享到 IG、Threads、LINE。')
-      : (CFG.link ? '下載後就能上傳到 IG、Threads 或 FB；記得附上試算連結，朋友點開就是同一組數字。' : '下載後就能上傳到 IG、Threads 或 FB。');
+      ? '按「分享圖片」後選 LINE、Threads 或 IG，就能直接傳出去。' + linkTip
+      : needExt ? 'LINE 內建的瀏覽器不能直接分享圖片。按上面的按鈕會改用手機瀏覽器開啟同一組試算，再按一次「產生分享圖」就能直接分享；也可以長按圖片儲存。'
+      : touch() && inApp ? '這個 App 內建的瀏覽器不能直接分享圖片。請點右上角「⋯」選擇「用瀏覽器開啟」，或長按圖片儲存。'
+      : touch() ? '長按圖片就能儲存或分享。'
+      : canCopy
+        ? `按「複製圖片」後，到 LINE 或 FB 的聊天室按 ${/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? '⌘＋V' : 'Ctrl＋V'} 貼上；要發 IG、Threads 請下載後上傳。` + linkTip
+        : '下載後就能上傳到 IG、Threads、LINE 或 FB。' + linkTip;
   }
   modal.querySelector('.cy-share-acts').addEventListener('click', async e => {
     const b = e.target.closest('button'); if (!b || !cur) return;
     if (b.dataset.a === 'share') {
-      try { await navigator.share({ files: [cur.file], title: '卡點遊實算', text: CFG.link ? `${cur.text} ${cur.link}` : cur.text.replace(/\s*👉$/, '') }); }
+      // 只傳圖片：同時帶文字時，有些 App（例如 LINE）只會收到文字或直接失敗
+      try { await navigator.share({ files: [cur.file] }); }
       catch (err) { if (!err || err.name !== 'AbortError') toast('這個瀏覽器無法直接分享，請改用下載'); }
+    } else if (b.dataset.a === 'ext') {
+      location.href = cur.link;
+    } else if (b.dataset.a === 'copy') {
+      try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': cur.blob })]); toast('已複製圖片，到聊天室貼上就可以了'); }
+      catch (err) { toast('這個瀏覽器無法複製圖片，請改用下載'); }
     } else if (b.dataset.a === 'dl') {
       const a = document.createElement('a'); a.href = cur.url; a.download = cur.file.name;
       document.body.appendChild(a); a.click(); a.remove(); toast('圖片已下載');
