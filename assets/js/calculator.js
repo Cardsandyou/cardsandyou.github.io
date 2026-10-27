@@ -1012,43 +1012,147 @@ function alignToTicket() {
   syncRestore();
 
   /* ---- 分享連結 ---- */
-  function shareURL() {
-    const q = new URLSearchParams();
-    const sys = currentSystem(), card = currentCard(), pc = pickedCard();
-    if (pickMode === 'card') {
-      q.set('card', pc.id);
-      if (scheme === '2027' && sysById(pc.sys).alt) q.set('scheme', '2027');
-    } else {
-      q.set('sys', $('system').value);
-      if (sys.earn) q.set('earn', $('earnCard').value);
-    }
-    if (sys.holder && $('holder').checked && !(card && card.holderLock)) q.set('holder', '1');
-    if ($('program').value !== '') q.set('prog', $('program').value);
-    const spend = num('spend'); if (spend) q.set('spend', String(spend));
-    if (!$('rate').disabled && $('rate').value !== '') q.set('rate', $('rate').value);
-    if (sys.currency === 'USD' ? region === 'domestic' : region === 'overseas') q.set('region', region);
-    if (region === 'overseas' && $('fee').value !== '1.5') q.set('fee', $('fee').value);
-    if (num('bonus') > 0) q.set('bonus', $('bonus').value);
+  /* ---- 短網址格式（v1.8.3）----
+     ?s=目前計算機的設定 &c=比較區每一列的設定（以 _ 分隔），每組設定是一串以 ~ 分隔的欄位：
+     0 c卡片id／s點數系統id　1 卡別（點數系統選、earn 型）　2 兌換目標序號　3 消費金額　4 回饋率
+     5 旗標（o 國外、d 美國卡、h 持卡身分、7 小樹點 2027 新制）　6 國外手續費　7 加成
+     8 OPENPOINT 加贈（A.B.C.D.兩列計算方式 0 每滿／1 單筆滿）
+     9 目標機票（計畫.航線.艙等.價格等級.單程1／來回2.稅金；自行輸入另加 .哩程.航空公司.航段）
+     目標機票欄位是「-」時，代表跟前一列相同（s 的前一列是比較區最後一列）。
+     比較區只記「輸入的條件」，打開連結時再算一次，所以網址很短，LINE 也能正常顯示成連結。 */
+  const tkOf = tok => String(tok).split('~')[9] || '';
+  function packTickets(toks) {                     // 連續相同的目標機票改寫成「-」，縮短網址
+    let prev = null;
+    return toks.map(tok => { const f = String(tok).split('~'), t = f[9] || '';
+      if (prev !== null && t && t === prev) { f[9] = '-'; tok = f.join('~'); } prev = t; return tok; });
+  }
+  function unpackTicket(tok, prev) { const f = String(tok).split('~'); if (f[9] === '-') { f[9] = prev || ''; } return f.join('~'); }
+  const strip = v => String(v || '').replace(/[~._<>&"'`\\]/g, '').trim().slice(0, 40);
+  function captureState() {
+    const sys = currentSystem(), card = currentCard(), pc = pickedCard(), a = tkAward();
+    const flags = (region === 'overseas' ? 'o' : '') + (sys.currency === 'USD' && region === 'domestic' ? 'd' : '')
+      + (sys.holder && $('holder').checked && !(card && card.holderLock) ? 'h' : '')
+      + (pickMode === 'card' && scheme === '2027' && sysById(pc.sys).alt ? '7' : '');
+    let op = '';
     if (sys.id === 'openpoint') {
-      ['opA', 'opB', 'opC', 'opD'].forEach(id => { if (num(id) > 0) q.set(id, String(num(id))); });
-      if (opMode[1] !== 'each' || opMode[2] !== 'each') q.set('opm', `${opMode[1]},${opMode[2]}`);
+      const v = ['opA', 'opB', 'opC', 'opD'].map(id => num(id) || '');
+      const m = (opMode[1] === 'once' ? '1' : '0') + (opMode[2] === 'once' ? '1' : '0');
+      if (v.some(Boolean) || m !== '00') op = [...v, m].join('.');
     }
-    const a = tkAward();
+    let tk = '';
     if (a.id !== 'none') {
-      q.set('tk', a.id === 'custom' ? `custom::${$('tkCabin').value}`
-        : `${a.id}:${$('tkRoute').value}:${$('tkCabin').value}${a.tiers && tkTier ? ':' + tkTier : ''}`);   // 華航／新航另外帶價格等級
-      if (tkTrip === 2) q.set('trip', '2');
-      if (a.id === 'custom') {
-        if (num('tkMiles')) q.set('tkmiles', String(num('tkMiles')));
-        if ($('tkAir').value.trim()) q.set('tkair', $('tkAir').value.trim());
-        if ($('tkRouteTxt').value.trim()) q.set('tkroute', $('tkRouteTxt').value.trim());
-      }
-      if (num('tkTax')) q.set('tax', String(num('tkTax')));
+      const base = [a.id, a.id === 'custom' ? '' : $('tkRoute').value, $('tkCabin').value, a.tiers && tkTier ? tkTier : '', tkTrip === 2 ? 2 : '', num('tkTax') || ''];
+      if (a.id === 'custom') base.push(num('tkMiles') || '', strip($('tkAir').value), strip($('tkRouteTxt').value));
+      tk = base.join('.').replace(/\.+$/, '');
     }
-    const cmp = encodeCompare(compare); if (cmp) q.set('cmp', cmp);   // 比較區的方案也一起帶過去
-    q.set('from', 'share');
-    q.set('openExternalBrowser', '1');   // 在 LINE 裡點開時改用手機預設瀏覽器，才能直接分享圖片（其他 App 會忽略這個參數）
-    return `${location.origin}${location.pathname}?${q.toString()}`;
+    const f = [
+      (pickMode === 'card' ? 'c' + pc.id : 's' + $('system').value),
+      pickMode === 'sys' && sys.earn ? $('earnCard').value : '',
+      $('program').value,
+      num('spend') || '',
+      $('rate').disabled ? '' : String($('rate').value).trim(),
+      flags,
+      region === 'overseas' && $('fee').value !== '1.5' ? $('fee').value : '',
+      num('bonus') > 0 ? $('bonus').value : '',
+      op, tk,
+    ].map(x => String(x).replace(/[~_]/g, ''));
+    while (f.length && f[f.length - 1] === '') f.pop();
+    return f.join('~');
+  }
+  const fmtN = v => { const d = String(v || '').replace(/[^\d]/g, ''); return d ? Number(d).toLocaleString('en-US') : ''; };
+  function applyState(tok) {
+    const f = String(tok || '').split('~'), head = f[0] || '', isCard = head[0] === 'c', id = head.slice(1);
+    const sysId = isCard ? (cardById(id) || {}).sys : id;
+    if (!sysById(sysId)) return false;
+    const flags = f[5] || '';
+    // 目標機票
+    const t = (f[9] || '').split('.'), tid = t[0] && AWARDS.some(x => x.id === t[0]) ? t[0] : 'none';
+    tkTrip = t[4] === '2' ? 2 : 1;
+    $('tkTrip').querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset.t === String(tkTrip)));
+    $('tkProg').value = tid; tkTier = +t[3] || 0; tkFillRoutes();
+    if (tid === 'custom') {
+      if (t[2]) $('tkCabin').value = t[2];
+      $('tkMiles').value = fmtN(t[6]); $('tkAir').value = decodeSafe(t[7]); $('tkRouteTxt').value = decodeSafe(t[8]);
+    } else if (tid !== 'none') {
+      if (t[1]) { $('tkRoute').value = t[1]; tkFillCabins(); }
+      if (t[2]) { $('tkCabin').value = t[2]; tkAutoMiles(); }
+    }
+    $('tkTax').value = tid !== 'none' ? fmtN(t[5]) : '';
+    // 卡片／點數系統
+    scheme = flags.includes('7') ? '2027' : 'now';
+    if (isCard) { setPickMode('card', false); $('system').value = id; fillPrograms(); }
+    else {
+      setPickMode('sys', false); $('system').value = id; fillPrograms();
+      if (f[1] && [...$('earnCard').options].some(o => o.value === f[1])) { $('earnCard').value = f[1]; fillPrograms(); }
+    }
+    const card = currentCard();
+    if (!(card && card.holderLock)) $('holder').checked = flags.includes('h');
+    if ([...$('program').options].some(o => o.value === f[2])) $('program').value = f[2];
+    // 消費條件（在 fillPrograms 之後設定，避免被切換模式時的記憶值蓋掉）
+    const usd = currentSystem().currency === 'USD';
+    setRegion(flags.includes('o') ? 'overseas' : flags.includes('d') ? 'domestic' : (usd ? 'overseas' : 'domestic'), false);
+    $('spend').value = fmtN(f[3]);
+    if (f[4]) $('rate').value = f[4];
+    $('fee').value = f[6] || '1.5';
+    $('bonus').value = f[7] || '0';
+    const op = (f[8] || '').split('.');
+    ['opA', 'opB', 'opC', 'opD'].forEach((k, i) => { $(k).value = op[i] || ''; });
+    [1, 2].forEach(n => {
+      opMode[n] = (op[4] || '00')[n - 1] === '1' ? 'once' : 'each';
+      document.querySelectorAll(`.op-seg[data-row="${n}"] button`).forEach(b => b.classList.toggle('on', b.dataset.m === opMode[n]));
+    });
+    syncPickUI(); render();
+    return true;
+  }
+  function decodeSafe(v) { try { return strip(decodeURIComponent(v || '')); } catch (e) { return strip(v); } }
+  // 每次加入比較時，記下這一列的輸入條件（分享時用）
+  let preLen = 0;
+  $('addCompare').addEventListener('click', () => { preLen = compare.length; }, true);
+  $('addCompare').addEventListener('click', () => {
+    if (compare.length > preLen) { compare[compare.length - 1].st = captureState(); save(); }
+  });
+  // 打開短網址：先依序重算比較區每一列，最後套用目前的設定
+  (function loadShortLink() {
+    const q = new URLSearchParams(location.search), sTok = q.get('s'), cTok = q.get('c');
+    if (!sTok && !cTok) return;
+    if (cTok) {
+      const before = compare.slice();
+      const box = $('compare'), keep = box.scrollIntoView; box.scrollIntoView = () => {};
+      compare = [];
+      let prevTk = '';
+      cTok.split('_').slice(0, MAX).forEach(raw => {
+        const tok = unpackTicket(raw, prevTk); prevTk = tkOf(tok);
+        if (!applyState(tok)) return;
+        const n = compare.length; addCompare();
+        if (compare.length > n) compare[compare.length - 1].st = tok;
+      });
+      box.scrollIntoView = keep;
+      if (before.length && JSON.stringify(before.map(c => c.st || c.sys + c.perMile)) !== JSON.stringify(compare.map(c => c.st || c.sys + c.perMile))) {
+        try { localStorage.setItem(MINE, JSON.stringify(before)); } catch (e) {}
+      }
+      save();
+    }
+    if (sTok) applyState(unpackTicket(sTok, cTok ? tkOf(compare.length ? compare[compare.length - 1].st : '') : ''));
+    renderCompare(); render(); syncRestore();
+    try {
+      const u = new URL(location.href);
+      ['s', 'c', 'openExternalBrowser', 'from'].forEach(k => u.searchParams.delete(k));
+      history.replaceState(null, '', u.pathname + (u.search || '') + u.hash);
+    } catch (e) {}
+    setTimeout(() => { const el = $('calc-main'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 350);
+  })();
+
+  function shareURL() {
+    const short = compare.every(c => c.st);
+    const toks = packTickets([...(short ? compare.map(c => c.st) : []), captureState()]);
+    let q = 's=' + encodeURIComponent(toks.pop());
+    if (compare.length) {
+      q += short
+        ? '&c=' + encodeURIComponent(toks.join('_'))
+        : '&cmp=' + encodeCompare(compare);                    // 舊版加入的比較列沒有輸入條件，只能用長格式
+    }
+    q += '&openExternalBrowser=1';   // 在 LINE 裡點開時改用手機預設瀏覽器，才能直接分享圖片（其他 App 會忽略這個參數）
+    return `${location.origin}${location.pathname}?${q}`;
   }
   function shareText(r) {
     return r && r.ok
