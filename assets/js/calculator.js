@@ -664,10 +664,49 @@ const AWARDS = [
       { name: '臺北－歐洲（經香港，如倫敦、巴黎）', y: 27000, pe: 52000, c: 91000 },
       { name: '臺北－北美西岸（經香港，如溫哥華、舊金山）', y: 27000, pe: 52000, c: 91000 },
     ]},
+  // 華航：2026/9/16 新制，同一航段依座位供需分三級（陣列依序為 充足／有限／稀少（候補）），表為來回
+  { id: 'ci', name: '華夏哩程（華航航班）', match: ['中華航空'], base: 'rt',
+    tiers: ['充足', '有限', '稀少（候補）'], tierHint: '依開票時的座位供需而定',
+    tierNote: '華航依座位供需分為充足、有限、稀少（候補）三級，實際所需哩程以開票時為準。',
+    src: '華航及華信航班，依 2026/9/16 起的新制兌換標準（依開票日適用）；單程為來回的一半。',
+    routes: [
+      { name: '臺灣－亞洲（一）：香港、廈門、福州', y: [18000, 19000, 20000], pe: null, c: [50000, 50000, 60000] },
+      { name: '臺灣－亞洲（二）：福岡、沖繩、新加坡、上海等', y: [30000, 32000, 35000], pe: [40000, 50000, 60000], c: [55000, 70000, 80000] },
+      { name: '臺灣－亞洲（三）：東京、大阪、首爾、曼谷等', y: [35000, 38000, 40000], pe: [40000, 50000, 60000], c: [60000, 75000, 90000] },
+      { name: '亞洲－紐澳', y: [80000, 90000, 105000], pe: [110000, 120000, 130000], c: [150000, 170000, 190000] },
+      { name: '亞洲－北美（紐約以外）', y: [80000, 90000, 105000], pe: [120000, 135000, 150000], c: [160000, 180000, 200000] },
+      { name: '亞洲－紐約', y: [90000, 100000, 110000], pe: [120000, 145000, 160000], c: [160000, 190000, 210000] },
+      { name: '亞洲－歐洲', y: [90000, 105000, 110000], pe: [120000, 130000, 140000], c: [160000, 190000, 210000] },
+    ]},
+  // 新航：Saver／Advantage 為固定兌換表，Access 為動態計價（商務艙觀察到四級，這裡取最低級），表為單程
+  { id: 'sq', name: 'KrisFlyer（新航航班）', match: ['新加坡航空'], base: 'ow',
+    tiers: ['Saver', 'Advantage', 'Access'], tierHint: 'Saver、Advantage 為固定價格，Access 為動態計價',
+    src: '新加坡航空航班，依 KrisFlyer 2025/11 改制後的兌換表（單程，來回為兩倍）；Access 為 2026/3 調整後觀察到的價格，新航可能隨時調整。經新加坡轉機到其他地區請用「自行輸入」。',
+    routes: [
+      { name: '臺北－新加坡', y: [15500, 33000, 47500], pe: null, c: [35500, 57500, 74500],
+        accessNote: { c: 'Access 為動態計價，商務艙可能為 74,500／89,000／107,000／118,500 哩（單程），這裡以最低級計算。' } },
+    ]},
   { id: 'custom', name: '自行輸入（其他航空／航段）', match: [], routes: [] },
 ];
 const CABINS = [['y', '經濟艙'], ['pe', '豪華（特選）經濟艙'], ['c', '商務艙']];
-var tkTrip = 1, ticket = null;   // 用 var：比較區在初始化前就會呼叫 ticketLine
+var tkTrip = 1, tkTier = 0, ticket = null;   // 用 var：比較區在初始化前就會呼叫 ticketLine
+// 航段某艙等的所需哩程：有價格等級的計畫（華航、新航）是陣列，依目前選的等級取值
+const tkVal = (r, cab) => { const v = r && r[cab]; return Array.isArray(v) ? v[tkTier] : v; };
+// 價格等級的顯示名稱（比較表、機票名稱用）；新航 Access 商務艙有多級，標示為最低級
+function tkTierLabel(a, r, cab) {
+  if (!a.tiers) return '';
+  const t = a.tiers[tkTier];
+  return r && r.accessNote && r.accessNote[cab] && t === 'Access' ? 'Access（最低級）' : t;
+}
+function tkFillTiers() {
+  const a = tkAward(), f = $('tkTierField');
+  f.hidden = !a.tiers;
+  if (!a.tiers) return;
+  if (tkTier >= a.tiers.length) tkTier = 0;
+  $('tkTier').style.gridTemplateColumns = `repeat(${a.tiers.length},1fr)`;
+  $('tkTier').innerHTML = a.tiers.map((t, i) => `<button type="button" data-i="${i}"${i === tkTier ? ' class="on"' : ''}>${t}</button>`).join('');
+  $('tkTierHint').textContent = a.tierHint || '';
+}
 const tkAward = () => AWARDS.find(a => a.id === $('tkProg').value) || AWARDS[0];
 function tkFillProg() { $('tkProg').innerHTML = AWARDS.map(a => `<option value="${a.id}">${a.name}</option>`).join(''); }
 function tkFillRoutes() {
@@ -675,6 +714,7 @@ function tkFillRoutes() {
   $('tkRoute').innerHTML = none ? '<option value="">請先選擇哩程計畫</option>' : custom ? '<option value="">自行輸入哩程</option>' : a.routes.map((r, i) => `<option value="${i}">${r.name}</option>`).join('');
   $('tkRoute').disabled = custom || none;
   $('tkRouteBox').hidden = custom; $('tkRouteTxtBox').hidden = !custom; $('tkAirField').hidden = !custom;   // 自行輸入：航空公司、航段自己寫
+  tkFillTiers();
   tkFillCabins();
 }
 function tkFillCabins() {
@@ -695,7 +735,7 @@ function tkAutoMiles() {
   $('tkMiles').readOnly = a.id !== 'custom';
   $('tkMilesHint').textContent = a.id === 'custom' ? '請輸入兌換所需哩程' : '依兌換表自動帶入';
   if (a.id !== 'custom' && r && r[cab] != null) {
-    const base = r[cab];
+    const base = tkVal(r, cab);
     const miles = a.base === 'rt' ? base / 2 * tkTrip : base * tkTrip;   // 長榮表為來回、亞萬表為單程
     $('tkMiles').value = fmt(miles);
   }
@@ -709,7 +749,7 @@ function renderTicket() {
   const trip = tkTrip === 2 ? '來回' : '單程';
   const label = a.id === 'custom'
     ? [$('tkAir').value.trim() || '其他航空', $('tkRouteTxt').value.trim() || '自訂航段', cabin, trip].join('・')
-    : `${a.name}・${$('tkRoute').selectedOptions[0]?.text || ''}・${cabin}・${trip}`;
+    : [a.name, $('tkRoute').selectedOptions[0]?.text || '', cabin, trip, tkTierLabel(a, a.routes[+$('tkRoute').value], $('tkCabin').value)].filter(Boolean).join('・');
   ticket = a.id !== 'none' && miles > 0 ? { award: a, miles, tax, label } : null;
   // 提醒：計算機的兌換目標與機票所屬哩程計畫不同
   const warn = $('tkWarn');
@@ -721,11 +761,18 @@ function renderTicket() {
   } else {
     const spend = miles * r.perMile;
     $('tkResult').innerHTML = `<div class="tk-main"><small>換這張機票需要消費</small><strong>NT$ ${fmt(Math.ceil(spend - 1e-6))}</strong>
-      <span>${fmt(miles)} 哩 × 每 ${fmt2(r.perMile)} 元 1 哩</span></div>
+      <span>${fmt(miles)} 哩 × 每 ${fmt2(r.perMile)} 元 1 哩</span>${tkNote(a) ? `<em class="tk-note">${tkNote(a)}</em>` : ''}</div>
       <div class="tk-side"><div><small>另付稅金與燃油附加費</small><b>${tax > 0 ? 'NT$ ' + fmt(tax) : '未填寫'}</b></div>
       <div><small>機票</small><b class="tk-label">${label}</b></div></div>`;
   }
   renderCompare();
+}
+// 價格等級的補充說明（華航三級、新航 Access 的級距）
+function tkNote(a) {
+  if (!a.tiers) return '';
+  const r = a.routes[+$('tkRoute').value], cab = $('tkCabin').value;
+  if (a.tiers[tkTier] === 'Access' && r && r.accessNote && r.accessNote[cab]) return r.accessNote[cab];
+  return a.tierNote || '';
 }
 // 每一列使用「加入比較當下」選的機票（c.tk），換了上方機票也不影響已加入的列
 function ticketLine(c, cost, cheapest) {
@@ -739,10 +786,13 @@ function ticketLine(c, cost, cheapest) {
   window.__tkReady = true;
   tkFillProg(); tkFillRoutes();
   $('tkProg').addEventListener('change', () => {
+    tkTier = 0;                                                     // 換哩程計畫：價格等級回到預設（華航充足、新航 Saver）
     if (tkAward().id === 'custom') ['tkAir', 'tkRouteTxt', 'tkMiles'].forEach(id => $(id).value = '');   // 切到自行輸入：不沿用上一條航線的哩程
     tkFillRoutes(); alignToTicket(); render(); });
   $('tkRoute').addEventListener('change', () => { tkFillCabins(); render(); });
   $('tkCabin').addEventListener('change', () => { tkAutoMiles(); render(); });
+  $('tkTier').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return;
+    tkTier = +b.dataset.i; $('tkTier').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); tkAutoMiles(); render(); });
   $('tkTrip').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return;
     tkTrip = +b.dataset.t; $('tkTrip').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); tkAutoMiles(); render(); });
   // 清空：自行輸入時航空公司、航段、哩程、稅金全部清空；內建航線只清稅金，所需哩程回到該航線的數字
@@ -776,12 +826,12 @@ function alignToTicket() {
 /* ---------- 網址預設情境（首頁「熱門情境」使用） ----------
    用卡片選：?card=卡片 id　用點數系統選：?sys=點數系統 id（earn 型可加 &earn=卡片 id）
    其他參數：&to=兌換目標（例：長榮航空）&scheme=2027 &holder=1（世界卡／財管會員）&region=overseas &rate=回饋率
-   &tk=哩程計畫:航線序號:艙等（y／pe／c）。舊網址的 ?sys=…&prog=序號 仍可使用。網址參數不會改變讀者記住的選法。 */
+   &tk=哩程計畫:航線序號:艙等（y／pe／c）:價格等級序號（選填，華航／新航用）。舊網址的 ?sys=…&prog=序號 仍可使用。網址參數不會改變讀者記住的選法。 */
 (function applyPreset() {
   const q = new URLSearchParams(location.search); if (![...q.keys()].length) return;
   const tk = (q.get('tk') || '').split(':');
   if (tk[0] && AWARDS.some(a => a.id === tk[0])) {
-    $('tkProg').value = tk[0]; tkFillRoutes();
+    $('tkProg').value = tk[0]; tkTier = +tk[3] || 0; tkFillRoutes();
     if (tk[1]) { $('tkRoute').value = tk[1]; tkFillCabins(); }
     if (tk[2]) { $('tkCabin').value = tk[2]; tkAutoMiles(); }
   }

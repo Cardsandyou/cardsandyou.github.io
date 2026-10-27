@@ -389,6 +389,13 @@ section[id],.system-card[id]{scroll-margin-top:84px}
 .cmp-info b em.tag-ok:after{content:"";position:absolute;top:0;bottom:0;left:-60%;width:40%;background:linear-gradient(100deg,transparent,#fffbea 50%,transparent);opacity:.9;z-index:-1;animation:tagShine 3.2s ease-in-out infinite}
 @keyframes tagShine{0%{left:-60%}55%,100%{left:130%}}
 @media(prefers-reduced-motion:reduce){.cmp-info b em.tag-ok:after{display:none}}
+/* 目標機票：價格等級（華航三級、新航 Saver／Advantage／Access） */
+.tk-tier-field{grid-column:1/-1;display:flex;flex-direction:column}
+.tk-tier-field .region-seg{max-width:640px;margin-top:8px}
+.tk-tier-field .flabel>small{float:none;margin-left:10px}
+.tk-main .tk-note{display:block;margin-top:8px;font-style:normal;font-size:12px;line-height:1.6;color:#c9d7cb}
+@media(max-width:700px){.tk-tier-field .region-seg{max-width:none}.ticket .tk-tier-field .region-seg button{font-size:14px}}
+
 /* ===== Publii 主題專用 ===== */
 .articles article{position:relative}
 .card-link{position:absolute;inset:0;z-index:1}
