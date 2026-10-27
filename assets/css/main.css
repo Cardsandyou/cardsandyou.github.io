@@ -446,3 +446,8 @@ section[id],.system-card[id]{scroll-margin-top:84px}
 .system-card.coming footer{margin-top:auto;border-top:1px dashed #d8dfd1;color:#a8853f;background:transparent}
 .cards > .coming:nth-child(2):last-child{grid-column:span 2}
 @media(max-width:700px){.cards > .coming:nth-child(2):last-child{grid-column:auto}}
+/* v1.8.2 手機版修正：計算機標題圖示不被擠扁；欄位提示文字很長時，輸入框改到下一行，不再被擠小 */
+.calc-title{align-items:flex-start}.calc-title>span{flex:0 0 44px;margin-top:2px}
+.fields label>.inputbox,.fields label>.inputbox.sm{clear:both}
+/* v1.8.4 換票算式分兩行顯示 */
+.tk-main span{display:block;line-height:1.7}
