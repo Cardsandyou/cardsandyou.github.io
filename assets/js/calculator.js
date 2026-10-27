@@ -761,11 +761,27 @@ function renderTicket() {
   } else {
     const spend = miles * r.perMile;
     $('tkResult').innerHTML = `<div class="tk-main"><small>換這張機票需要消費</small><strong>NT$ ${fmt(Math.ceil(spend - 1e-6))}</strong>
-      <span>${fmt(miles)} 哩 × 每 ${fmt2(r.perMile)} 元 1 哩</span>${tkNote(a) ? `<em class="tk-note">${tkNote(a)}</em>` : ''}</div>
+      ${tkFormula(r, miles, spend)}${tkNote(a) ? `<em class="tk-note">${tkNote(a)}</em>` : ''}</div>
       <div class="tk-side"><div><small>另付稅金與燃油附加費</small><b>${tax > 0 ? 'NT$ ' + fmt(tax) : '未填寫'}</b></div>
       <div><small>機票</small><b class="tk-label">${label}</b></div></div>`;
   }
   renderCompare();
+}
+// 換票算式：每哩成本畫面上會四捨五入（例：12.67 顯示成 12.7），直接寫「哩程 × 每哩成本」會跟總額對不起來，
+// 所以一般回饋率的卡片改用「所需點數 ÷ 回饋率」呈現，讀者自己按計算機也算得出同一個數字。
+function tkFormula(r, miles, spend) {
+  const total = Math.ceil(spend - 1e-6);
+  if (!r.extra && (r.earn || r.rate > 0)) {
+    const pts = r.earn || r.usd ? r.prog.pts : ptsOf(r.prog), need = miles * pts / r.prog.miles / (1 + (r.bonus || 0) / 100);
+    const unit = r.usd ? 'ROVE Miles' : (r.sys.unit || '點'), mu = r.unit || '哩';
+    const fee = r.fee ? ` ×（1＋${r.usd ? '' : '國外'}手續費 ${fmt(r.fee, 2)}%）` : '';
+    const l1 = `${fmt(miles)} ${mu} × ${fmt(pts, 2)} ${unit}／${fmt(r.prog.miles, 2)} ${mu}${r.bonus ? ` ÷（1＋加成 ${fmt(r.bonus, 1)}%）` : ''} ＝ ${fmt(need, 2)} ${unit}`;
+    const l2 = r.earn ? `${fmt(need, 2)} ${unit} × 每 ${fmt(r.earn, 2)} 元累積 1 點${fee} ≈ NT$ ${fmt(total)}`
+      : r.usd ? `${fmt(need, 2)} ${unit} ÷ 每 1 美元 ${fmt(r.rate, 2)} 倍 × 匯率 ${fmt(r.fx, 3)}${fee} ≈ NT$ ${fmt(total)}`
+      : `${fmt(need, 2)} ${unit} ÷ 回饋 ${fmt(r.rate, 2)}%${fee} ≈ NT$ ${fmt(total)}`;
+    return `<span>${l1}</span><span>${l2}</span>`;
+  }
+  return `<span>${fmt(miles)} 哩 × 每約 ${fmt(r.perMile, 2)} 元 1 哩 ≈ NT$ ${fmt(total)}（每哩成本為四捨五入後的數字）</span>`;
 }
 // 價格等級的補充說明（華航三級、新航 Access 的級距）
 function tkNote(a) {
