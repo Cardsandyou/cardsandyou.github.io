@@ -826,14 +826,26 @@ function alignToTicket() {
 /* ---------- 網址預設情境（首頁「熱門情境」使用） ----------
    用卡片選：?card=卡片 id　用點數系統選：?sys=點數系統 id（earn 型可加 &earn=卡片 id）
    其他參數：&to=兌換目標（例：長榮航空）&scheme=2027 &holder=1（世界卡／財管會員）&region=overseas &rate=回饋率
-   &tk=哩程計畫:航線序號:艙等（y／pe／c）:價格等級序號（選填，華航／新航用）。舊網址的 ?sys=…&prog=序號 仍可使用。網址參數不會改變讀者記住的選法。 */
+   &tk=哩程計畫:航線序號:艙等（y／pe／c）:價格等級序號（選填，華航／新航用）。舊網址的 ?sys=…&prog=序號 仍可使用。網址參數不會改變讀者記住的選法。
+   分享連結另外會帶：&spend=消費金額 &bonus=加成 &fee=國外手續費 &opA～opD／&opm=each,once（OPENPOINT 加贈）
+   &trip=2（來回）&tax=稅金 &tkmiles／&tkair／&tkroute（自行輸入的機票）&from=share（開啟後捲到計算機） */
 (function applyPreset() {
   const q = new URLSearchParams(location.search); if (![...q.keys()].length) return;
   const tk = (q.get('tk') || '').split(':');
+  if (q.get('trip') === '2') {                                  // 來回：要在自動帶入哩程之前設定
+    tkTrip = 2; $('tkTrip').querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset.t === '2'));
+  }
   if (tk[0] && AWARDS.some(a => a.id === tk[0])) {
     $('tkProg').value = tk[0]; tkTier = +tk[3] || 0; tkFillRoutes();
     if (tk[1]) { $('tkRoute').value = tk[1]; tkFillCabins(); }
     if (tk[2]) { $('tkCabin').value = tk[2]; tkAutoMiles(); }
+    if (tk[0] === 'custom') {
+      const n = v => { const d = String(v || '').replace(/\D/g, ''); return d ? Number(d).toLocaleString('en-US') : ''; };
+      $('tkMiles').value = n(q.get('tkmiles'));
+      $('tkAir').value = (q.get('tkair') || '').slice(0, 30);
+      $('tkRouteTxt').value = (q.get('tkroute') || '').slice(0, 40);
+    }
+    if (q.get('tax')) $('tkTax').value = Number(String(q.get('tax')).replace(/\D/g, '') || 0).toLocaleString('en-US');
   }
   const qc = q.get('card'), qs = q.get('sys') === 'kgiwm' ? 'kgi' : q.get('sys');
   if (q.get('scheme') === '2027') scheme = '2027';
@@ -849,5 +861,457 @@ function alignToTicket() {
   if (to) { const i = sys.programs.findIndex((p, k) => (p.short === to || p.name === to) && shown(k)); if (i >= 0) $('program').value = String(i); }
   else if (pi != null && shown(pi)) $('program').value = pi;
   if (q.get('rate')) $('rate').value = q.get('rate');
+  // 分享連結帶的其他欄位（要在 fillPrograms 之後設定，避免被切換模式時的記憶值蓋掉）
+  if (q.get('region') === 'overseas' || q.get('region') === 'domestic') setRegion(q.get('region'), false);
+  if (q.get('spend')) { const d = String(q.get('spend')).replace(/[^\d]/g, ''); $('spend').value = d ? Number(d).toLocaleString('en-US') : ''; }
+  if (q.get('bonus')) $('bonus').value = q.get('bonus');
+  if (q.get('fee')) $('fee').value = q.get('fee');
+  ['opA', 'opB', 'opC', 'opD'].forEach(id => { if (q.get(id)) $(id).value = q.get(id); });
+  (q.get('opm') || '').split(',').forEach((m, i) => {
+    if (m !== 'each' && m !== 'once') return;
+    opMode[i + 1] = m;
+    document.querySelectorAll(`.op-seg[data-row="${i + 1}"] button`).forEach(b => b.classList.toggle('on', b.dataset.m === m));
+  });
   syncPickUI(); render();
+  if (q.get('from') === 'share') setTimeout(() => { const el = $('calc-main'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 350);
+})();
+
+/* ---------- 分享：參數連結與分享圖 ----------
+   分享連結：把目前所有欄位寫成網址參數（applyPreset 會讀回來），朋友打開就是同一組試算。
+   分享圖：用 canvas 畫一張 1080 寬的直式圖卡（IG／Threads 適用），手機可直接叫出分享選單，電腦則下載。
+   不需要任何外部套件；按鈕與樣式都由這段程式加到頁面上。
+   開關與文字在 Publii「主題設定 → 計算機」，由 page-calculator.hbs 寫進 window.CY_SHARE；沒有設定時全部開啟。 */
+(function initShare() {
+  const CFG = Object.assign({ link: true, image: true, compare: true, site: 'cardsandyou.com/calculator', note: '試算僅供參考，以官方公告為準' }, window.CY_SHARE || {});
+  if (!CFG.link && !CFG.image && !CFG.compare) return;
+  const SITE = String(CFG.site || '').trim() || 'cardsandyou.com/calculator';
+  const NOTE = String(CFG.note || '').trim();
+  const C = { green: '#123d32', green2: '#245744', cream: '#f6f2df', gold: '#c7a45a', goldlite: '#e5d4a3', soft: '#c3d2c4' };
+  const TC = '"Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif';
+  const NUM = '"DM Sans", ' + TC;
+
+  /* ---- 樣式 ---- */
+  const css = document.createElement('style');
+  css.textContent = `
+.share-bar{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px;position:relative;z-index:1}
+.share-bar.one{grid-template-columns:1fr}
+.share-bar button{display:flex;justify-content:center;gap:6px;cursor:pointer;margin:0;padding:12px 10px;border:1px solid rgba(229,212,163,.5);background:rgba(255,255,255,.06);color:${C.cream};font:700 14px "Noto Sans TC",sans-serif}
+.share-bar button:hover{background:rgba(255,255,255,.13);border-color:${C.goldlite}}
+.cmp-acts{display:flex;gap:10px;flex-shrink:0}
+.compare button.cmp-img{white-space:nowrap}
+.cy-share{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(10,30,24,.72)}
+.cy-share[hidden]{display:none}
+.cy-share-box{position:relative;width:min(440px,100%);max-height:calc(100vh - 32px);overflow:auto;background:#f7f6ef;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+.cy-share-box h4{margin:0 0 12px;color:${C.green};font:700 18px "Noto Sans TC",sans-serif}
+.cy-share-box img{display:block;width:100%;height:auto;border:1px solid #dce4d9;background:${C.green}}
+.cy-share-load{display:flex;align-items:center;justify-content:center;aspect-ratio:4/5;background:${C.green};color:${C.goldlite};font:600 14px "Noto Sans TC",sans-serif}
+.cy-share-acts{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
+.cy-share-acts button{cursor:pointer;margin:0;padding:12px 10px;border:1px solid ${C.green};background:${C.green};color:#fff;font:700 14px "Noto Sans TC",sans-serif;display:flex;justify-content:center}
+.cy-share-acts button.alt{background:transparent;color:${C.green}}
+.cy-share-acts button[hidden]{display:none}
+.cy-share-acts button:only-child,.cy-share-acts .wide{grid-column:1/-1}
+.cy-share-tip{margin:12px 0 0;color:#738176;font-size:12px;line-height:1.6}
+.cy-x{position:absolute;top:10px;right:10px;width:34px!important;height:34px;margin:0!important;padding:0!important;border:0!important;background:transparent!important;color:${C.green}!important;font:400 26px/1 sans-serif!important;cursor:pointer;justify-content:center}
+.cy-toast{position:fixed;left:50%;bottom:28px;z-index:1001;transform:translateX(-50%);padding:11px 18px;background:${C.green};color:${C.cream};border:1px solid ${C.gold};font:600 14px "Noto Sans TC",sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.25);transition:opacity .25s}
+.cy-toast[hidden]{display:none}
+@media (max-width:640px){.compare-head{flex-wrap:wrap}.cmp-acts{width:100%}.cmp-acts button{flex:1}}`;
+  document.head.appendChild(css);
+
+  /* ---- 按鈕 ---- */
+  if (CFG.link || CFG.image) {
+    const bar = document.createElement('div');
+    bar.className = 'share-bar' + (CFG.link && CFG.image ? '' : ' one');
+    bar.innerHTML = (CFG.link ? '<button type="button" id="shareLink">🔗 分享這組試算</button>' : '')
+      + (CFG.image ? '<button type="button" id="shareImg">🖼 產生分享圖</button>' : '');
+    document.querySelector('.results').appendChild(bar);
+  }
+  if (CFG.compare) {
+    const acts = document.createElement('div');
+    acts.className = 'cmp-acts';
+    const clr = $('clearCompare');
+    clr.parentNode.insertBefore(acts, clr);
+    acts.innerHTML = '<button type="button" class="ghost cmp-img" id="shareCmp">🖼 產生比較圖</button>';
+    acts.appendChild(clr);
+    // 比較區重畫時，順便更新「產生比較圖」按鈕（至少 2 組才有比較的意義）
+    const baseRenderCompare = renderCompare;
+    renderCompare = function () { baseRenderCompare(); $('shareCmp').hidden = compare.length < 2; };
+    $('shareCmp').hidden = compare.length < 2;
+  }
+
+  /* ---- 小工具 ---- */
+  const toastEl = document.createElement('div');
+  toastEl.className = 'cy-toast'; toastEl.hidden = true; toastEl.setAttribute('role', 'status');
+  document.body.appendChild(toastEl);
+  let toastTimer;
+  function toast(msg) {
+    toastEl.textContent = msg; toastEl.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { toastEl.hidden = true; }, 2200);
+  }
+  async function copyText(t) {
+    try { await navigator.clipboard.writeText(t); return true; } catch (e) {}
+    const ta = document.createElement('textarea');
+    ta.value = t; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+    document.body.appendChild(ta); ta.select();
+    let ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+    ta.remove(); return ok;
+  }
+  const touch = () => window.matchMedia && matchMedia('(pointer: coarse)').matches;
+  const ticketFits = r => !!(ticket && r.ok && (ticket.award.id === 'custom' || r.prog.any
+    || ticket.award.match.some(k => (r.prog.name + r.prog.short).includes(k))));
+
+  /* ---- 分享連結 ---- */
+  function shareURL() {
+    const q = new URLSearchParams();
+    const sys = currentSystem(), card = currentCard(), pc = pickedCard();
+    if (pickMode === 'card') {
+      q.set('card', pc.id);
+      if (scheme === '2027' && sysById(pc.sys).alt) q.set('scheme', '2027');
+    } else {
+      q.set('sys', $('system').value);
+      if (sys.earn) q.set('earn', $('earnCard').value);
+    }
+    if (sys.holder && $('holder').checked && !(card && card.holderLock)) q.set('holder', '1');
+    if ($('program').value !== '') q.set('prog', $('program').value);
+    const spend = num('spend'); if (spend) q.set('spend', String(spend));
+    if (!$('rate').disabled && $('rate').value !== '') q.set('rate', $('rate').value);
+    if (sys.currency === 'USD' ? region === 'domestic' : region === 'overseas') q.set('region', region);
+    if (region === 'overseas' && $('fee').value !== '1.5') q.set('fee', $('fee').value);
+    if (num('bonus') > 0) q.set('bonus', $('bonus').value);
+    if (sys.id === 'openpoint') {
+      ['opA', 'opB', 'opC', 'opD'].forEach(id => { if (num(id) > 0) q.set(id, String(num(id))); });
+      if (opMode[1] !== 'each' || opMode[2] !== 'each') q.set('opm', `${opMode[1]},${opMode[2]}`);
+    }
+    const a = tkAward();
+    if (a.id !== 'none') {
+      q.set('tk', a.id === 'custom' ? `custom::${$('tkCabin').value}`
+        : `${a.id}:${$('tkRoute').value}:${$('tkCabin').value}${a.tiers && tkTier ? ':' + tkTier : ''}`);   // 華航／新航另外帶價格等級
+      if (tkTrip === 2) q.set('trip', '2');
+      if (a.id === 'custom') {
+        if (num('tkMiles')) q.set('tkmiles', String(num('tkMiles')));
+        if ($('tkAir').value.trim()) q.set('tkair', $('tkAir').value.trim());
+        if ($('tkRouteTxt').value.trim()) q.set('tkroute', $('tkRouteTxt').value.trim());
+      }
+      if (num('tkTax')) q.set('tax', String(num('tkTax')));
+    }
+    q.set('from', 'share');
+    return `${location.origin}${location.pathname}?${q.toString()}`;
+  }
+  function shareText(r) {
+    return r && r.ok
+      ? `我用卡點遊實算算了一下：${r.label} → ${r.prog.short}，每消費 ${fmt2(r.perMile)} 元 = 1 ${r.unit}。你也來算算看 👉`
+      : '卡點遊實算：算出每消費幾元換 1 哩 👉';
+  }
+  if (CFG.link) $('shareLink').addEventListener('click', async () => {
+    const r = compute(), url = shareURL();
+    if (navigator.share && touch()) {
+      try { await navigator.share({ title: '卡點遊實算', text: shareText(r), url }); return; }
+      catch (e) { if (e && e.name === 'AbortError') return; }
+    }
+    toast(await copyText(url) ? '已複製分享連結，貼給朋友就能看到同一組試算' : '複製失敗，請長按網址列手動複製');
+  });
+
+  /* ---- canvas 繪圖工具 ---- */
+  function rrect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+  // 斷行：英數字整個單字不拆開；「 → 」前後優先分行；行尾附近有「・」「）」「 」就在那裡斷，避免只剩一兩個字掉到下一行
+  function wrap(ctx, text, maxW) {
+    text = String(text);
+    const arrow = text.indexOf(' → ');
+    if (arrow > 0 && ctx.measureText(text).width > maxW)
+      return [...wrap(ctx, text.slice(0, arrow), maxW), ...wrap(ctx, text.slice(arrow + 1), maxW)];
+    const tokens = text.match(/[A-Za-z0-9$.,%+\-]+|\s+|./gu) || [];
+    const lines = []; let line = '';
+    for (const tk of tokens) {
+      if (line && ctx.measureText(line + tk).width > maxW) {
+        let cut = -1;
+        for (let i = line.length - 1; i >= Math.max(1, line.length - 8); i--) if ('・）、， '.includes(line[i])) { cut = i + 1; break; }
+        if (cut > 0 && cut < line.length) { lines.push(line.slice(0, cut).trimEnd()); line = line.slice(cut).trimStart() + tk; }
+        else { lines.push(line.trimEnd()); line = /^\s+$/.test(tk) ? '' : tk; }
+      } else line += tk;
+    }
+    if (line.trim()) lines.push(line.trimEnd());
+    return lines;
+  }
+  // 依可用寬度自動縮字，最多 maxLines 行，超過就加「…」
+  function fitText(ctx, text, maxW, maxLines, size, minSize, weight, family) {
+    let s = size, lines;
+    for (; s >= minSize; s -= 2) {
+      ctx.font = `${weight} ${s}px ${family}`;
+      lines = wrap(ctx, text, maxW);
+      if (lines.length <= maxLines) return { lines, size: s };
+    }
+    s = minSize; ctx.font = `${weight} ${s}px ${family}`;
+    lines = wrap(ctx, text, maxW).slice(0, maxLines);
+    let last = lines[maxLines - 1];
+    while (last && ctx.measureText(last + '…').width > maxW) last = last.slice(0, -1);
+    lines[maxLines - 1] = last + '…';
+    return { lines, size: s };
+  }
+  function spaced(ctx, px) { if ('letterSpacing' in ctx) ctx.letterSpacing = px + 'px'; }
+  async function loadFonts(text) {
+    if (!document.fonts || !document.fonts.load) return;
+    const jobs = [
+      document.fonts.load(`700 40px "Noto Sans TC"`, text), document.fonts.load(`900 40px "Noto Sans TC"`, text),
+      document.fonts.load(`500 40px "Noto Sans TC"`, text),
+      document.fonts.load(`700 40px "DM Sans"`, '0123456789,.$NTUS ABCDEFGHIJKLMNOPQRSTUVWXYZ'),
+      document.fonts.load(`500 40px "DM Sans"`, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'),
+    ];
+    await Promise.race([Promise.all(jobs).catch(() => {}), new Promise(res => setTimeout(res, 2500))]);
+  }
+  let logoImg = null;
+  function loadLogo() {
+    const src = (document.querySelector('.brand-logo') || {}).src;
+    if (!src) return Promise.resolve(null);
+    if (logoImg) return Promise.resolve(logoImg);
+    return new Promise(res => {
+      const img = new Image(); img.crossOrigin = 'anonymous';
+      img.onload = () => { logoImg = img; res(img); }; img.onerror = () => res(null);
+      img.src = src;
+      setTimeout(() => res(null), 3000);
+    });
+  }
+  // 先畫在高畫布上，算出實際內容高度後再裁切（最矮 1350＝IG 4:5）
+  function makeCanvas() { const c = document.createElement('canvas'); c.width = 1080; c.height = 2200; return c; }
+  function drawFrame(ctx, H) {
+    ctx.fillStyle = C.green; ctx.fillRect(0, 0, 1080, H);
+    const g = ctx.createRadialGradient(980, 120, 10, 980, 120, 620);
+    g.addColorStop(0, 'rgba(199,164,90,.20)'); g.addColorStop(1, 'rgba(199,164,90,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 1080, H);
+    ctx.strokeStyle = 'rgba(229,212,163,.35)'; ctx.lineWidth = 2;
+    rrect(ctx, 36, 36, 1008, H - 72, 6); ctx.stroke();
+  }
+  function drawHeader(ctx, logo) {
+    let x = 90;
+    if (logo) {
+      ctx.save(); ctx.beginPath(); ctx.arc(132, 132, 42, 0, Math.PI * 2); ctx.clip();
+      const s = Math.min(logo.naturalWidth, logo.naturalHeight);
+      ctx.drawImage(logo, (logo.naturalWidth - s) / 2, (logo.naturalHeight - s) / 2, s, s, 90, 90, 84, 84);
+      ctx.restore();
+      ctx.strokeStyle = C.gold; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(132, 132, 42, 0, Math.PI * 2); ctx.stroke();
+      x = 196;
+    }
+    ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+    ctx.fillStyle = C.cream; ctx.font = `900 42px ${TC}`; spaced(ctx, 2); ctx.fillText('卡點遊', x, 130);
+    ctx.fillStyle = C.goldlite; ctx.font = `700 18px ${NUM}`; spaced(ctx, 5); ctx.fillText('CARDS AND YOU', x, 162);
+    spaced(ctx, 0);
+  }
+  function drawFooter(ctx, H, line1) {
+    ctx.strokeStyle = 'rgba(199,164,90,.35)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(90, H - 168); ctx.lineTo(990, H - 168); ctx.stroke();
+    ctx.textAlign = 'left'; ctx.fillStyle = C.soft; ctx.font = `500 26px ${TC}`;
+    ctx.fillText(line1, 90, H - 116);
+    ctx.fillStyle = C.goldlite; ctx.font = `700 34px ${NUM}`; spaced(ctx, 1);
+    ctx.fillText(SITE, 90, H - 70); spaced(ctx, 0);
+    ctx.textAlign = 'right'; ctx.fillStyle = 'rgba(195,210,196,.7)'; ctx.font = `400 20px ${TC}`;
+    if (NOTE) ctx.fillText(NOTE, 990, H - 74);
+    ctx.textAlign = 'left';
+  }
+  function crop(src, H) {
+    const out = document.createElement('canvas'); out.width = 1080; out.height = H;
+    out.getContext('2d').drawImage(src, 0, 0, 1080, H, 0, 0, 1080, H);
+    return out;
+  }
+  // 先畫內容（量出高度），再把背景＋內容一起重畫到正確高度
+  async function render2(texts, paint, footer) {
+    await loadFonts(texts.join('') + '卡點遊每消費元哩程累積速度估計稅金燃油附加費機票試算僅供參考以官方公告為準…');
+    const logo = await loadLogo();
+    const measure = makeCanvas().getContext('2d');
+    const end = paint(measure);
+    const H = Math.max(1350, Math.ceil(end + 210));
+    const big = makeCanvas(), ctx = big.getContext('2d');
+    drawFrame(ctx, H); drawHeader(ctx, logo); paint(ctx); drawFooter(ctx, H, footer);
+    const out = crop(big, H);
+    try { out.toDataURL(); return out; }               // 確認畫布沒有被跨網域圖片汙染
+    catch (e) { const b2 = makeCanvas(), c2 = b2.getContext('2d'); drawFrame(c2, H); drawHeader(c2, null); paint(c2); drawFooter(c2, H, footer); return crop(b2, H); }
+  }
+
+  /* ---- 試算結果圖 ---- */
+  function resultImage() {
+    const r = compute(); if (!r.ok) return null;
+    const title = `${r.label} → ${r.prog.short}`;
+    const cond = [
+      r.usd ? `每 1 美元 ${fmt(r.rate, 2)} 倍` : (r.rate != null ? `回饋 ${fmt(r.rate, 2)}%` : (r.earn ? `每 ${fmt(r.earn, 2)} 元累積 1 點` : '')),
+      r.region === 'overseas' ? (r.usd ? `臺灣卡付款・手續費 ${fmt(r.fee, 2)}%` : `國外消費・手續費 ${fmt(r.fee, 2)}%`) : (r.usd ? '美國卡付款' : '國內消費'),
+      r.bonus ? `轉點加成 ${fmt(r.bonus, 1)}%` : '', r.extra ? `活動加贈 ${fmt(r.extra)} 點` : '',
+      r.ratio,
+    ].filter(Boolean).join('　·　');
+    const fits = ticketFits(r);
+    const tkSpend = fits ? Math.ceil(ticket.miles * r.perMile - 1e-6) : 0;
+    const spendTxt = r.usd ? `US$ ${fmt(r.spend)}` : `NT$ ${fmt(r.spend)}`;
+    const texts = [title, cond, fits ? ticket.label : '', planOf(r.prog)];
+    const paint = ctx => {
+      let y = 262;
+      ctx.textAlign = 'left'; ctx.fillStyle = C.goldlite; ctx.font = `700 22px ${NUM}`; spaced(ctx, 6);
+      ctx.fillText('MY MILES RESULT', 90, y); spaced(ctx, 0);
+      // 方案名稱
+      const t = fitText(ctx, title, 900, 2, 54, 38, 700, TC);
+      ctx.fillStyle = '#ffffff'; y += 28;
+      t.lines.forEach(l => { y += t.size * 1.25; ctx.fillText(l, 90, y); });
+      const pl = planOf(r.prog);
+      if (pl) { y += 44; ctx.fillStyle = C.soft; ctx.font = `500 24px ${TC}`; ctx.fillText('哩程計畫：' + pl, 90, y); }
+      // 每哩成本（主數字）
+      y += 76; ctx.fillStyle = C.goldlite; ctx.font = `700 26px ${TC}`; spaced(ctx, 3); ctx.fillText('哩程累積速度', 90, y); spaced(ctx, 0);
+      const n = fmt2(r.perMile), unit = `元 = 1 ${r.unit}`;
+      let ns = fits ? 168 : 196;
+      const widthAt = s => { ctx.font = `500 40px ${TC}`; const a = ctx.measureText('每消費 ').width, c = ctx.measureText(' ' + unit).width;
+        ctx.font = `700 ${s}px ${NUM}`; return a + ctx.measureText(n).width + c; };
+      while (ns > 90 && widthAt(ns) > 900) ns -= 6;
+      y += ns * 0.92;
+      ctx.font = `500 40px ${TC}`; ctx.fillStyle = C.cream; ctx.fillText('每消費', 90, y);
+      let x = 90 + ctx.measureText('每消費 ').width;
+      ctx.font = `700 ${ns}px ${NUM}`; ctx.fillStyle = C.goldlite; spaced(ctx, -3); ctx.fillText(n, x, y); x += ctx.measureText(n).width + 10; spaced(ctx, 0);
+      ctx.font = `500 40px ${TC}`; ctx.fillStyle = C.cream; ctx.fillText(unit, x, y);
+      y += 52; ctx.fillStyle = C.soft; ctx.font = `400 24px ${TC}`; ctx.fillText('數字越小，代表累積越快', 90, y);
+      // 消費金額／預估哩程
+      y += 46; ctx.strokeStyle = 'rgba(199,164,90,.3)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(90, y); ctx.lineTo(990, y); ctx.stroke();
+      y += 56; ctx.fillStyle = C.goldlite; ctx.font = `600 24px ${TC}`;
+      ctx.fillText('消費金額', 90, y); ctx.fillText(r.unit === '哩' ? '預估累積哩程' : '預估累積點數', 560, y);
+      y += 64; ctx.fillStyle = C.cream; ctx.font = `700 54px ${NUM}`;
+      ctx.fillText(spendTxt, 90, y); ctx.fillText(`${fmt(Math.floor(r.miles))} ${r.unit}`, 560, y);
+      // 條件
+      const cl = fitText(ctx, cond, 900, 2, 24, 20, 400, TC);
+      y += 18; ctx.fillStyle = 'rgba(246,242,223,.72)';
+      cl.lines.forEach(l => { y += cl.size * 1.5; ctx.fillText(l, 90, y); });
+      // 目標機票
+      if (fits) {
+        y += 40; const top = y;
+        const tl = (() => { ctx.font = `500 24px ${TC}`; return fitText(ctx, ticket.label, 820, 2, 24, 20, 500, TC); })();
+        const h = 162 + tl.lines.length * 34 + (ticket.tax ? 38 : 0);
+        ctx.fillStyle = 'rgba(255,255,255,.07)'; rrect(ctx, 90, top, 900, h, 4); ctx.fill();
+        ctx.strokeStyle = 'rgba(199,164,90,.55)'; ctx.lineWidth = 2; rrect(ctx, 90, top, 900, h, 4); ctx.stroke();
+        let ty = top + 52; ctx.fillStyle = C.goldlite; ctx.font = `700 24px ${TC}`; ctx.fillText('換這張機票需要消費', 130, ty);
+        ty += 70; ctx.fillStyle = C.cream; ctx.font = `700 60px ${NUM}`; ctx.fillText(`NT$ ${fmt(tkSpend)}`, 130, ty);
+        ctx.fillStyle = 'rgba(246,242,223,.8)'; ctx.font = `500 ${tl.size}px ${TC}`;
+        ty += 12; tl.lines.forEach(l => { ty += 34; ctx.fillText(l, 130, ty); });
+        if (ticket.tax) { ty += 38; ctx.fillStyle = C.soft; ctx.font = `400 22px ${TC}`; ctx.fillText(`另付稅金與燃油附加費 NT$ ${fmt(ticket.tax)}・所需 ${fmt(ticket.miles)} 哩`, 130, ty); }
+        y = top + h;
+      }
+      return y;
+    };
+    return render2(texts, paint, '用「卡點遊實算」算出你的每哩成本');
+  }
+
+  /* ---- 比較圖 ---- */
+  function compareImage() {
+    if (compare.length < 2) return null;
+    const rows = compare.map((c, i) => ({ c, i, cost: costOf(c) }));
+    const costRows = rows.filter(r => r.cost);
+    const mode = costRows.length >= 2 && cmpSort !== 'speed' ? 'cost' : 'speed';
+    if (mode === 'cost') rows.sort((a, b) => (a.cost ? a.cost.total : Infinity) - (b.cost ? b.cost.total : Infinity) || a.i - b.i);
+    else rows.sort((a, b) => a.c.perMile - b.c.perMile || a.i - b.i);
+    const per10k = c => 10000 / c.perMile;
+    const maxSpeed = Math.max(...compare.map(per10k), 1), maxCost = Math.max(...costRows.map(r => r.cost.total), 1);
+    const best = rows[0];
+    const tkLabel = mode === 'cost' ? (costRows[0].c.tk.label) : '';
+    const title = mode === 'cost' ? '換同一張機票，哪個方案最省？' : '同樣刷卡，哪個方案累積最快？';
+    const texts = [title, tkLabel, ...rows.map(r => `${r.c.sys} → ${r.c.prog}`)];
+    const paint = ctx => {
+      let y = 262;
+      ctx.textAlign = 'left'; ctx.fillStyle = C.goldlite; ctx.font = `700 22px ${NUM}`; spaced(ctx, 6);
+      ctx.fillText('MILES COMPARISON', 90, y); spaced(ctx, 0);
+      const t = fitText(ctx, title, 900, 2, 54, 40, 700, TC);
+      ctx.fillStyle = '#ffffff'; y += 28; t.lines.forEach(l => { y += t.size * 1.25; ctx.fillText(l, 90, y); });
+      if (tkLabel) {
+        const s = fitText(ctx, '目標機票：' + tkLabel, 900, 2, 26, 22, 500, TC);
+        ctx.fillStyle = C.soft; y += 12; s.lines.forEach(l => { y += s.size * 1.45; ctx.fillText(l, 90, y); });
+      }
+      y += 34;
+      rows.forEach((row, k) => {
+        const c = row.c, isBest = row === best && (mode === 'speed' || row.cost);
+        const top = y, name = `${c.sys} → ${c.prog}`;
+        const nm = fitText(ctx, name, 520, 2, 30, 24, 700, TC);
+        const h = 70 + nm.lines.length * nm.size * 1.3 + 30;
+        if (isBest) { ctx.fillStyle = 'rgba(199,164,90,.14)'; rrect(ctx, 70, top - 6, 940, h + 12, 4); ctx.fill();
+          ctx.strokeStyle = 'rgba(199,164,90,.7)'; ctx.lineWidth = 2; rrect(ctx, 70, top - 6, 940, h + 12, 4); ctx.stroke(); }
+        // 字母（加入順序）
+        ctx.fillStyle = isBest ? C.gold : 'rgba(229,212,163,.18)'; ctx.beginPath(); ctx.arc(122, top + 44, 26, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = isBest ? C.green : C.goldlite; ctx.font = `700 26px ${NUM}`; ctx.textAlign = 'center';
+        ctx.fillText(String.fromCharCode(65 + row.i), 122, top + 53); ctx.textAlign = 'left';
+        // 名稱
+        ctx.fillStyle = '#ffffff'; ctx.font = `700 ${nm.size}px ${TC}`;
+        let ny = top + 18; nm.lines.forEach(l => { ny += nm.size * 1.3; ctx.fillText(l, 172, ny); });
+        // 右側數字
+        ctx.textAlign = 'right';
+        if (mode === 'cost') {
+          ctx.fillStyle = isBest ? C.goldlite : C.cream; ctx.font = `700 40px ${NUM}`;
+          ctx.fillText(row.cost ? `NT$ ${fmt(row.cost.total)}` : '—', 990, top + 56);
+          ctx.fillStyle = C.soft; ctx.font = `400 20px ${TC}`; ctx.fillText(row.cost ? `每 ${fmt2(c.perMile)} 元 = 1 ${c.unit}` : '兌換目標不同', 990, top + 88);
+        } else {
+          ctx.font = `500 22px ${TC}`; ctx.fillStyle = C.soft; const u = ` 元 = 1 ${c.unit}`; ctx.fillText(u, 990, top + 56);
+          const uw = ctx.measureText(u).width;
+          ctx.fillStyle = isBest ? C.goldlite : C.cream; ctx.font = `700 46px ${NUM}`; ctx.fillText(fmt2(c.perMile), 990 - uw - 4, top + 56);
+          const nw = ctx.measureText(fmt2(c.perMile)).width;
+          ctx.fillStyle = C.soft; ctx.font = `500 22px ${TC}`; ctx.fillText('每消費 ', 990 - uw - 8 - nw, top + 56);
+        }
+        ctx.textAlign = 'left';
+        // 長條
+        const by = top + h - 22, frac = mode === 'cost' ? (row.cost ? row.cost.total / maxCost : 0) : per10k(c) / maxSpeed;
+        ctx.fillStyle = 'rgba(255,255,255,.08)'; rrect(ctx, 172, by - 14, 560, 14, 7); ctx.fill();
+        if (frac > 0) { ctx.fillStyle = isBest ? C.gold : 'rgba(229,212,163,.55)'; rrect(ctx, 172, by - 14, Math.max(14, 560 * frac), 14, 7); ctx.fill(); }
+        ctx.fillStyle = 'rgba(246,242,223,.7)'; ctx.font = `400 20px ${TC}`;
+        ctx.fillText(mode === 'cost' ? (row.cost ? '換票總成本' : '') : `每消費 1 萬 ≈ ${fmt(per10k(c))} ${c.unit}`, 748, by);
+        y = top + h + (k < rows.length - 1 ? 26 : 0);
+      });
+      y += 34; ctx.fillStyle = C.soft; ctx.font = `400 22px ${TC}`;
+      ctx.fillText(mode === 'cost' ? '長條為換票總成本（消費金額＋稅金與燃油附加費），越短越省' : '長條為每消費 1 萬元可得的哩程，越長累積越快', 90, y);
+      return y;
+    };
+    return render2(texts, paint, '用「卡點遊實算」把不同點數放上同一個天平');
+  }
+
+  /* ---- 預覽視窗 ---- */
+  const modal = document.createElement('div');
+  modal.className = 'cy-share'; modal.hidden = true;
+  modal.innerHTML = `<div class="cy-share-box" role="dialog" aria-modal="true" aria-labelledby="cyShareT">
+    <button type="button" class="cy-x" aria-label="關閉">×</button>
+    <h4 id="cyShareT">分享圖</h4><div class="cy-share-view"></div>
+    <div class="cy-share-acts"><button type="button" data-a="share">分享圖片</button><button type="button" data-a="dl">下載圖片</button>${CFG.link ? '<button type="button" data-a="link" class="alt wide">複製這組試算的連結</button>' : ''}</div>
+    <p class="cy-share-tip"></p></div>`;
+  document.body.appendChild(modal);
+  let cur = null, lastFocus = null;
+  function closeModal() {
+    modal.hidden = true; document.body.style.overflow = '';
+    if (cur && cur.url) URL.revokeObjectURL(cur.url); cur = null;
+    if (lastFocus) lastFocus.focus();
+  }
+  modal.addEventListener('click', e => { if (e.target === modal || e.target.closest('.cy-x')) closeModal(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !modal.hidden) closeModal(); });
+  async function openImage(kind) {
+    lastFocus = document.activeElement;
+    const view = modal.querySelector('.cy-share-view');
+    modal.querySelector('#cyShareT').textContent = kind === 'cmp' ? '比較圖' : '試算結果分享圖';
+    view.innerHTML = '<div class="cy-share-load">圖片產生中…</div>';
+    modal.hidden = false; document.body.style.overflow = 'hidden';
+    modal.querySelector('.cy-x').focus();
+    const canvas = await (kind === 'cmp' ? compareImage() : resultImage());
+    if (!canvas || modal.hidden) { if (!canvas) { closeModal(); toast('請先在計算機算出結果'); } return; }
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+    if (!blob) { closeModal(); toast('圖片產生失敗，請稍後再試'); return; }
+    const d = new Date(), stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    const file = new File([blob], `cardsandyou-${kind === 'cmp' ? 'compare' : 'miles'}-${stamp}.png`, { type: 'image/png' });
+    cur = { file, url: URL.createObjectURL(blob), link: shareURL(), text: kind === 'cmp' ? '我把幾種點數方案放在一起比了一下 👉' : shareText(compute()) };
+    view.innerHTML = `<img src="${cur.url}" alt="${kind === 'cmp' ? '方案比較圖' : '試算結果圖'}">`;
+    const canShare = !!(navigator.canShare && navigator.canShare({ files: [file] }));
+    modal.querySelector('[data-a="share"]').hidden = !canShare;
+    modal.querySelector('.cy-share-tip').textContent = canShare
+      ? (CFG.link ? '可以直接分享到 IG、Threads、LINE；連結請另外貼在貼文或留言裡。' : '可以直接分享到 IG、Threads、LINE。')
+      : (CFG.link ? '下載後就能上傳到 IG、Threads 或 FB；記得附上試算連結，朋友點開就是同一組數字。' : '下載後就能上傳到 IG、Threads 或 FB。');
+  }
+  modal.querySelector('.cy-share-acts').addEventListener('click', async e => {
+    const b = e.target.closest('button'); if (!b || !cur) return;
+    if (b.dataset.a === 'share') {
+      try { await navigator.share({ files: [cur.file], title: '卡點遊實算', text: CFG.link ? `${cur.text} ${cur.link}` : cur.text.replace(/\s*👉$/, '') }); }
+      catch (err) { if (!err || err.name !== 'AbortError') toast('這個瀏覽器無法直接分享，請改用下載'); }
+    } else if (b.dataset.a === 'dl') {
+      const a = document.createElement('a'); a.href = cur.url; a.download = cur.file.name;
+      document.body.appendChild(a); a.click(); a.remove(); toast('圖片已下載');
+    } else if (b.dataset.a === 'link') {
+      toast(await copyText(cur.link) ? '已複製試算連結' : '複製失敗，請稍後再試');
+    }
+  });
+  if (CFG.image) $('shareImg').addEventListener('click', () => openImage('result'));
+  if (CFG.compare) $('shareCmp').addEventListener('click', () => openImage('cmp'));
 })();
