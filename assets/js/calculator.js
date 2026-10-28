@@ -552,7 +552,15 @@ function costOf(c) {                            // 這一列換自己那張機�
   const need = Math.max(0, t.miles - (c.ownMiles || 0));          // 扣掉已有點數換得的哩程後，還要靠消費累積的部分
   if (need > 0 && c.perMile == null) return null;
   const spend = need > 0 ? Math.ceil(need * c.perMile - 1e-6) : 0, tax = t.tax || 0;
-  return { spend, tax, total: spend + tax, own: (c.ownMiles || 0) > 0 };
+  // 可換 2 張以上時，另外算出全部張數的總成本（消費金額＋每張稅金 × 張數）
+  const n = Math.floor(c.miles / t.miles + 1e-9);
+  let totalN = null;
+  if (n >= 2) {
+    const needN = Math.max(0, n * t.miles - (c.ownMiles || 0));
+    const spendN = needN > 0 ? (c.perMile != null ? Math.ceil(needN * c.perMile - 1e-6) : null) : 0;
+    if (spendN != null) totalN = spendN + tax * n;
+  }
+  return { spend, tax, total: spend + tax, own: (c.ownMiles || 0) > 0, n, totalN };
 }
 function renderCompare() {
   const ct = $('cmpTicket');                    // 還沒有任何一列記錄機票時，提示可以先選目標機票
@@ -588,7 +596,7 @@ function renderCompare() {
     const tags = (isCheap ? '<em class="tag-cheap">總花費最低</em>' : '') + (isMost ? '<em>累積最多哩程</em>' : '')
       + (canRedeem ? `<em class="tag-ok">${Math.floor(c.miles / c.tk.miles + 1e-9) >= 2 ? `恭喜！可換 ${Math.floor(c.miles / c.tk.miles + 1e-9)} 張機票` : '恭喜！已經可換機票'}</em>` : '');
     const bar = mode === 'cost'
-      ? (cost ? `<div class="cmp-bar"><div class="track"><i style="width:${(cost.total / maxCost * 100).toFixed(1)}%"></i></div><span>換票總成本 NT$ ${fmt(cost.total)}</span></div>`
+      ? (cost ? `<div class="cmp-bar"><div class="track"><i style="width:${(cost.total / maxCost * 100).toFixed(1)}%"></i></div><span>${cost.totalN != null ? `換 ${cost.n} 張票總成本 NT$ ${fmt(cost.totalN)}${cost.totalN === cost.total * cost.n ? `（每張 NT$ ${fmt(cost.total)}）` : ''}` : `換票總成本 NT$ ${fmt(cost.total)}`}</span></div>`
               : '<div class="cmp-bar none"><div class="track"></div><span>未算出總成本</span></div>')
       : `<div class="cmp-bar"><div class="track"><i style="width:${(per10k(c) / maxSpeed * 100).toFixed(1)}%"></i></div><span>每消費 NT$ 1 萬 ≈ ${fmt(per10k(c))} ${c.unit}</span></div>`;
     return `<li class="cmp${hi ? ' best' : ''}${mode === 'cost' && !cost ? ' nocost' : ''}">
@@ -837,7 +845,7 @@ function ticketLine(c, cost, cheapest) {
   const diff = cheapest != null && cost.total > cheapest ? `<span class="cmp-diff">比最低多 NT$ ${fmt(cost.total - cheapest)}</span>` : '';
   const n = Math.floor(c.miles / t.miles + 1e-9);               // 可換幾張：稅金與燃油附加費每張都要付
   const multi = n >= 2 && cost.tax ? `<span class="cmp-ticket-multi">可換 ${n} 張，稅金與燃油附加費每張 NT$ ${fmt(cost.tax)}，${n} 張共 NT$ ${fmt(cost.tax * n)}</span>` : '';
-  return `<small class="cmp-ticket"><span class="cmp-tk-label">目標機票：${t.label}・所需 ${fmt(t.miles)} 哩</span>換這張機票的總成本 <b>NT$ ${fmt(cost.total)}</b>${diff}<span class="cmp-ticket-sub">（${cost.own ? '扣除已有點數後還需消費' : '消費金額'} NT$ ${fmt(cost.spend)}＋稅金與燃油附加費 ${cost.tax ? 'NT$ ' + fmt(cost.tax) + '（一張）' : '未填寫'}）</span>${multi}</small>`;
+  return `<small class="cmp-ticket"><span class="cmp-tk-label">目標機票：${t.label}・所需 ${fmt(t.miles)} 哩</span>換一張機票的總成本 <b>NT$ ${fmt(cost.total)}</b>${diff}<span class="cmp-ticket-sub">（${cost.own ? '扣除已有點數後還需消費' : '消費金額'} NT$ ${fmt(cost.spend)}＋稅金與燃油附加費 ${cost.tax ? 'NT$ ' + fmt(cost.tax) + '（一張）' : '未填寫'}）</span>${multi}</small>`;
 }
 (function initTicket() {
   window.__tkReady = true;
