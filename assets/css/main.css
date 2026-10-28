@@ -451,3 +451,8 @@ section[id],.system-card[id]{scroll-margin-top:84px}
 .fields label>.inputbox,.fields label>.inputbox.sm{clear:both}
 /* v1.8.4 換票算式分兩行顯示 */
 .tk-main span{display:block;line-height:1.7}
+
+/* 已有點數：可換幾張（v1.8.7） */
+.tk-main .tk-count{margin-top:12px;padding:8px 12px;border:1px solid #c7a45a55;background:#ffffff0d;font-size:14px;line-height:1.6;color:#dfe8e0}
+.tk-main .tk-count b{color:var(--goldlite)}
+.tk-main .tk-count.ok{border-color:#c7a45a;background:#c7a45a1f}

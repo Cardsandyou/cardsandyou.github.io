@@ -233,7 +233,7 @@ const memo = { NTD: { spend: '90,000', rate: '3' }, USD: { spend: '1,000', rate:
 let mode = 'NTD';
 const $ = id => document.getElementById(id);
 const fmt = (n, d = 0) => new Intl.NumberFormat('zh-TW', { maximumFractionDigits: d }).format(n);
-const fmt2 = n => (n >= 100 ? fmt(n, 0) : fmt(n, n >= 10 ? 1 : 2));
+const fmt2 = n => (n == null || !isFinite(n) ? '—' : n >= 100 ? fmt(n, 0) : fmt(n, n >= 10 ? 1 : 2));
 const num = id => +String($(id).value).replace(/[^\d.]/g, '') || 0;
 let compare = [];
 try { compare = JSON.parse(localStorage.getItem(KEY) || '[]').slice(0, MAX); } catch (e) { compare = []; }
@@ -311,6 +311,11 @@ function fillPrograms(keepShort) {
   $('srcNote').textContent = [sys.note, card && card.note, NOTICE].filter(Boolean).join(' ');
   applyMode(sys);
   $('opExtra').hidden = sys.id !== 'openpoint';
+  // 已有點數：單位跟著點數系統；換成另一個點數系統時清空，避免把小樹點當成 ROVE Miles 計算
+  const ownKey = (SYSTEMS.find(x => x.alt === sys.id) || sys).id;
+  if (window.__ownKey && window.__ownKey !== ownKey) $('own').value = '';
+  window.__ownKey = ownKey;
+  $('ownUnit').textContent = sys.currency === 'USD' ? 'ROVE Miles' : sys.earn ? sys.unit : '點';
   syncPickUI();
 }
 // 卡別、制度、持卡身分、卡片說明、回饋率欄位的顯示狀態
@@ -427,42 +432,50 @@ function compute() {
   const fee = region === 'overseas' ? Math.max(0, num('fee')) : 0;
   const k = 1 + fee / 100;              // 實際付出 = 消費金額 ×（1＋手續費），點數／哩程仍以消費金額計算
   r.region = region; r.fee = fee;
-  r.perMile *= k; if (r.perMileUSD) r.perMileUSD *= k;
+  if (r.perMile != null) r.perMile *= k; if (r.perMileUSD) r.perMileUSD *= k;
   return r;
 }
 function computeBase() {
   const sys = currentSystem(), prog = currentProgram();
   const spend = Math.max(0, num('spend')), rate = Math.max(0, num('rate')), bonus = Math.max(0, num('bonus'));
+  const own = Math.max(0, num('own'));                       // 目前已有點數（選填）：直接加進可換哩程，不影響每哩成本
   if (!prog) return { ok: false, msg: `${sys.name} 的兌換比例還沒有資料，補上後就能計算。` };
-  const unit = prog.unit || '哩', label = pickLabel();
+  const unit = prog.unit || '哩', label = pickLabel(), k = 1 + bonus / 100;
+  // 把已有點數加進結果；回饋率沒填但有已有點數時，仍可算出可換哩程（每哩成本顯示為 —）
+  const withOwn = (r, ptsPer) => {
+    r.own = own; r.ownMiles = own / ptsPer * prog.miles * k;
+    r.spendMiles = r.miles; r.points += own; r.miles += r.ownMiles;
+    return r;
+  };
   if (sys.earn) {                                             // 依卡別每幾元累積 1 點，再依兌換比例轉哩程
     const per = earnPer();
-    if (per <= 0) return { ok: false, msg: '請填寫累積比例（每幾元累積 1 點，例：每 18 元輸入 18）。' };
-    const points = spend / per;
-    const miles = points / prog.pts * prog.miles * (1 + bonus / 100);
-    const perMile = per * (prog.pts / prog.miles) / (1 + bonus / 100);
-    return { ok: true, sys, prog, unit, label, spend, rate: null, earn: per, bonus, points, miles, perMile,
-      ratio: earnRatio(sys, prog, per) };
+    if (per <= 0 && own <= 0) return { ok: false, msg: '請填寫累積比例（每幾元累積 1 點，例：每 18 元輸入 18）。' };
+    const points = per > 0 ? spend / per : 0;
+    const miles = points / prog.pts * prog.miles * k;
+    const perMile = per > 0 ? per * (prog.pts / prog.miles) / k : null;
+    return withOwn({ ok: true, sys, prog, unit, label, spend, rate: null, earn: per || null, bonus, points, miles, perMile,
+      ratio: earnRatio(sys, prog, per) }, prog.pts);
   }
   if (sys.currency === 'USD') {
-    if (rate <= 0) return { ok: false, msg: '請輸入回饋倍數（例：每 1 美元 5 倍輸入 5）。' };
+    if (rate <= 0 && own <= 0) return { ok: false, msg: '請輸入回饋倍數（例：每 1 美元 5 倍輸入 5）。' };
     const pts = spend * rate;                                   // 取得的 ROVE Miles
-    const miles = pts / prog.pts * prog.miles * (1 + bonus / 100);
-    const perMileUSD = (prog.pts / prog.miles) / rate / (1 + bonus / 100);
-    return { ok: true, sys, prog, unit, label, spend, rate, bonus, points: pts, miles, usd: true,
-      perMileUSD, perMile: perMileUSD * FX.mid, fx: FX.mid,
-      ratio: `${fmt(prog.pts, 2)} ROVE Miles → ${fmt(prog.miles, 2)} ${unit}` };
+    const miles = pts / prog.pts * prog.miles * k;
+    const perMileUSD = rate > 0 ? (prog.pts / prog.miles) / rate / k : null;
+    return withOwn({ ok: true, sys, prog, unit, label, spend, rate, bonus, points: pts, miles, usd: true,
+      perMileUSD, perMile: perMileUSD != null ? perMileUSD * FX.mid : null, fx: FX.mid,
+      ratio: `${fmt(prog.pts, 2)} ROVE Miles → ${fmt(prog.miles, 2)} ${unit}` }, prog.pts);
   }
-  if (rate <= 0) return { ok: false, msg: '請輸入消費回饋率（例：3% 輸入 3）。' };
+  if (rate <= 0 && own <= 0) return { ok: false, msg: '請輸入消費回饋率（例：3% 輸入 3）。' };
   const extra = opExtraPoints(sys, spend);                    // OPENPOINT 滿額／iCashPay 加贈點數
   const pts = ptsOf(prog);                                    // 世界卡身分：長榮、亞萬、華航套用優惠比例
   const points = spend * rate / 100 + extra.total;
-  const miles = points / pts * prog.miles * (1 + bonus / 100);
-  const perMile = extra.total > 0 && spend > 0 && miles > 0
+  const miles = points / pts * prog.miles * k;
+  const perMile = rate <= 0 ? null
+    : extra.total > 0 && spend > 0 && miles > 0
     ? spend / miles                                           // 有加贈點數：以實際總點數回推
-    : (pts / prog.miles) / (rate / 100) / (1 + bonus / 100);
-  return { ok: true, sys, prog, unit, label, spend, rate, bonus, points, miles, perMile, extra: extra.total,
-    ratio: `${fmt(pts, 2)} ${sys.unit} → ${fmt(prog.miles, 2)} ${unit}` };
+    : (pts / prog.miles) / (rate / 100) / k;
+  return withOwn({ ok: true, sys, prog, unit, label, spend, rate, bonus, points, miles, perMile, extra: extra.total,
+    ratio: `${fmt(pts, 2)} ${sys.unit} → ${fmt(prog.miles, 2)} ${unit}` }, pts);
 }
 function earnRatio(sys, prog, per) {
   const conv = prog.pts === prog.miles ? `1:1 轉${prog.unit === '點' ? '換' : '哩程'}` : `${fmt(prog.pts, 2)} 點 → ${fmt(prog.miles, 2)} ${prog.unit || '哩'}`;
@@ -498,8 +511,10 @@ function renderCore() {
   $('unitOut2').textContent = r.unit;
   $('perMileOut').textContent = fmt2(r.perMile);
   $('targetOut').textContent = `${r.label} → ${r.prog.short}`;
-  if (r.extra > 0) $('pointsOut').innerHTML = `${fmt(r.points, 2)} 點<small class="sub-val">含活動加贈 ${fmt(r.extra)} 點</small>`;
-  else $('pointsOut').textContent = r.points == null ? '不適用' : fmt(r.points, 2) + (r.usd ? ' ROVE Miles' : ' ' + (r.sys.earn ? r.sys.unit : '點'));
+  const pu = r.usd ? ' ROVE Miles' : ' ' + (r.sys.earn ? r.sys.unit : '點');
+  $('pointsOut').innerHTML = fmt(r.points, 2) + pu
+    + (r.extra > 0 ? `<small class="sub-val">含活動加贈 ${fmt(r.extra)} 點</small>` : '')
+    + (r.own > 0 ? `<small class="sub-val">含已有點數 ${fmt(r.own)}${pu}</small>` : '');
   if (r.sys.id === 'openpoint') {
     const e = opExtraPoints(r.sys, r.spend);
     $('opSum').textContent = e.total > 0
@@ -509,7 +524,7 @@ function renderCore() {
   if (r.usd) $('spendOut').innerHTML = `US$ ${fmt(r.spend)}<small class="sub-val">約 NT$ ${fmt(r.spend * r.fx)}</small>`;
   else $('spendOut').textContent = 'NT$ ' + fmt(r.spend);
   if (r.fee > 0) $('spendOut').insertAdjacentHTML('beforeend', `<small class="sub-val">含國外手續費 ${fmt(r.fee, 2)}%：實付 ${r.usd ? 'US$ ' + fmt(r.spend * (1 + r.fee / 100), 2) : 'NT$ ' + fmt(r.spend * (1 + r.fee / 100))}</small>`);
-  if (r.usd) { $('speedSub').hidden = false; $('speedSub').textContent = `約 US$ ${fmt(r.perMileUSD, 3)} = 1 ${r.unit}，依當日匯率換算成臺幣`; }
+  if (r.usd && r.perMileUSD) { $('speedSub').hidden = false; $('speedSub').textContent = `約 US$ ${fmt(r.perMileUSD, 3)} = 1 ${r.unit}，依當日匯率換算成臺幣`; }
   $('addCompare').disabled = compare.length >= MAX;
 }
 
@@ -521,6 +536,7 @@ function addCompare() {
     sys: r.label, prog: r.prog.short, unit: r.unit, ratio: r.ratio, earn: r.earn || null,
     rate: r.rate, bonus: r.bonus, spend: r.spend, miles: r.miles, perMile: r.perMile,
     usd: !!r.usd, perMileUSD: r.perMileUSD || null, extra: r.extra || 0, fee: r.fee || 0, fixed: !!r.prog.any, plan: planOf(r.prog),
+    own: r.own || 0, ownMiles: r.ownMiles || 0, ownUnit: r.usd ? 'ROVE Miles' : r.sys.earn ? r.sys.unit : '點',
     tk: ticket ? { id: ticket.award.id, match: ticket.award.match, miles: ticket.miles, tax: ticket.tax, label: ticket.label } : null,
   });
   save(); renderCompare(); render();
@@ -533,8 +549,10 @@ try { cmpSort = localStorage.getItem(SORT_KEY); } catch (e) {}
 function costOf(c) {                            // 這一列換自己那張機票的總成本；沒有機票或兌換目標不符時為 null
   const t = c.tk; if (!t) return null;
   if (!(t.id === 'custom' || c.fixed || t.match.some(k => c.prog.includes(k)))) return null;
-  const spend = Math.ceil(t.miles * c.perMile - 1e-6), tax = t.tax || 0;
-  return { spend, tax, total: spend + tax };
+  const need = Math.max(0, t.miles - (c.ownMiles || 0));          // 扣掉已有點數換得的哩程後，還要靠消費累積的部分
+  if (need > 0 && c.perMile == null) return null;
+  const spend = need > 0 ? Math.ceil(need * c.perMile - 1e-6) : 0, tax = t.tax || 0;
+  return { spend, tax, total: spend + tax, own: (c.ownMiles || 0) > 0 };
 }
 function renderCompare() {
   const ct = $('cmpTicket');                    // 還沒有任何一列記錄機票時，提示可以先選目標機票
@@ -552,22 +570,23 @@ function renderCompare() {
     ? '依換票總成本由低到高排列，長條為換票總成本（消費金額＋稅金與燃油附加費），越短越省。'
     : '每消費幾元可換 1 哩，數字越小代表累積越快。長條為每消費 1 萬元可得的哩程。';
   $('cmpNote').hidden = costRows.length < 2;
-  const per10k = c => 10000 / c.perMile;
+  const per10k = c => c.perMile ? 10000 / c.perMile : 0;
   const maxSpeed = Math.max(...compare.map(per10k), 1), maxCost = Math.max(...costRows.map(r => r.cost.total), 1);
-  const fastest = compare.length > 1 ? Math.min(...compare.map(c => c.perMile)) : null;
+  const fastest = compare.length > 1 ? Math.min(...compare.map(c => c.perMile ?? Infinity)) : null;
   const mostMiles = compare.length > 1 ? Math.max(...compare.map(c => Math.floor(c.miles))) : null;   // 「累積最多哩程」：可得哩程最多的一列
   const cheapest = costRows.length > 1 ? Math.min(...costRows.map(r => r.cost.total)) : null;
   if (mode === 'cost') rows.sort((a, b) => (a.cost ? a.cost.total : Infinity) - (b.cost ? b.cost.total : Infinity) || a.i - b.i);
-  else rows.sort((a, b) => a.c.perMile - b.c.perMile || a.i - b.i);
+  else rows.sort((a, b) => (a.c.perMile ?? Infinity) - (b.c.perMile ?? Infinity) || a.i - b.i);
   $('compareList').innerHTML = rows.map(({ c, i, cost }) => {
     const cond = [c.usd ? (c.fee ? `臺灣卡付款 · 手續費 ${fmt(c.fee, 2)}%` : '美國卡付款 · 免手續費') : (c.fee ? `國外消費 · 手續費 ${fmt(c.fee, 2)}%` : ''),c.usd ? `每 1 美元 ${fmt(c.rate, 2)} 倍` : (c.rate != null ? `回饋 ${fmt(c.rate, 2)}%` : ''),
-      c.extra ? `活動加贈 ${fmt(c.extra)} 點` : '', c.bonus ? `加成 ${fmt(c.bonus, 1)}%` : '', c.usd ? `消費 US$ ${fmt(c.spend)}` : `消費 NT$ ${fmt(c.spend)}`].filter(Boolean).join('　·　');
+      c.extra ? `活動加贈 ${fmt(c.extra)} 點` : '', c.bonus ? `加成 ${fmt(c.bonus, 1)}%` : '', c.usd ? `消費 US$ ${fmt(c.spend)}` : `消費 NT$ ${fmt(c.spend)}`,
+      c.own ? `已有 ${fmt(c.own)} ${c.ownUnit || '點'}` : ''].filter(Boolean).join('　·　');
     const isFast = fastest != null && c.perMile === fastest, isCheap = cheapest != null && cost && cost.total === cheapest;
     const hi = mode === 'cost' ? isCheap : isFast;
     const isMost = mostMiles != null && Math.floor(c.miles) === mostMiles;
     const canRedeem = cost && c.miles >= c.tk.miles;                // 這組消費累積的哩程已經夠換這張機票
     const tags = (isCheap ? '<em class="tag-cheap">總花費最低</em>' : '') + (isMost ? '<em>累積最多哩程</em>' : '')
-      + (canRedeem ? '<em class="tag-ok">恭喜！已經可換機票</em>' : '');
+      + (canRedeem ? `<em class="tag-ok">${Math.floor(c.miles / c.tk.miles + 1e-9) >= 2 ? `恭喜！可換 ${Math.floor(c.miles / c.tk.miles + 1e-9)} 張機票` : '恭喜！已經可換機票'}</em>` : '');
     const bar = mode === 'cost'
       ? (cost ? `<div class="cmp-bar"><div class="track"><i style="width:${(cost.total / maxCost * 100).toFixed(1)}%"></i></div><span>換票總成本 NT$ ${fmt(cost.total)}</span></div>`
               : '<div class="cmp-bar none"><div class="track"></div><span>未算出總成本</span></div>')
@@ -583,7 +602,7 @@ function renderCompare() {
 }
 function resetCalc() {
   setRegion('domestic', false); $('fee').value = '1.5';
-  scheme = 'now'; $('holder').checked = false; memo.EARN.rate = '';
+  scheme = 'now'; $('holder').checked = false; memo.EARN.rate = ''; $('own').value = '';
   $('system').value = $('system').options[0].value; fillPrograms();
   $('spend').value = ''; $('rate').value = ''; $('bonus').value = '0';
   memo.USD = { spend: '', rate: '' };
@@ -603,6 +622,7 @@ $('schemeSeg').addEventListener('click', e => { const b = e.target.closest('butt
 $('regionSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; setRegion(b.dataset.r, true); render(); });
 $('fee').addEventListener('input', render);
 ['rate', 'bonus', 'opA', 'opB', 'opC', 'opD'].forEach(id => $(id).addEventListener('input', render));
+$('own').addEventListener('input', () => { const el = $('own'), d = el.value.replace(/\D/g, ''); el.value = d ? Number(d).toLocaleString('en-US') : ''; render(); });
 $('opClear').addEventListener('click', () => { ['opA', 'opB', 'opC', 'opD'].forEach(id => $(id).value = '0'); render(); });
 document.querySelectorAll('.op-seg').forEach(seg => seg.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
@@ -759,9 +779,28 @@ function renderTicket() {
   if (!r.ok || !ticket) {
     $('tkResult').innerHTML = `<div class="tk-empty">${a.id === 'none' ? '請先選擇哩程計畫與航線（選填）。' : !r.ok ? '請在下方哩程計算機算出每哩成本。' : '請選擇航線或輸入所需哩程。'}</div>`;
   } else {
-    const spend = miles * r.perMile;
-    $('tkResult').innerHTML = `<div class="tk-main"><small>換這張機票需要消費</small><strong>NT$ ${fmt(Math.ceil(spend - 1e-6))}</strong>
-      ${tkFormula(r, miles, spend)}${tkNote(a) ? `<em class="tk-note">${tkNote(a)}</em>` : ''}</div>
+    // 已有點數：先扣掉已有點數能換的哩程，剩下的才需要靠消費累積
+    const own = r.ownMiles || 0, need = Math.max(0, miles - own);
+    let main;
+    if (own <= 0) {
+      const spend = miles * r.perMile;
+      main = `<small>換這張機票需要消費</small><strong>NT$ ${fmt(Math.ceil(spend - 1e-6))}</strong>${tkFormula(r, miles, spend)}`;
+    } else if (need === 0) {
+      main = `<small>已有點數就夠換這張機票了</small><strong>不用再消費</strong><span>已有點數可換 ${fmt(Math.floor(own))} 哩 ≥ 所需 ${fmt(miles)} 哩</span>`;
+    } else if (r.perMile != null) {
+      const spend = need * r.perMile;
+      main = `<small>扣掉已有點數，換這張機票需要消費</small><strong>NT$ ${fmt(Math.ceil(spend - 1e-6))}</strong><span>所需 ${fmt(miles)} 哩 － 已有點數可換 ${fmt(Math.floor(own))} 哩 ＝ 還差 ${fmt(Math.ceil(need))} 哩</span>${tkFormula(r, Math.ceil(need), spend)}`;
+    } else {
+      main = `<small>扣掉已有點數，換這張機票需要消費</small><strong>—</strong><span>還差 ${fmt(Math.ceil(need))} 哩，填寫回饋率就能算出還要刷多少</span>`;
+    }
+    // 可換幾張：已有點數＋這次消費合計的哩程
+    const total = r.miles, n = Math.floor(total / miles + 1e-9), rest = total - n * miles;
+    const gap = n === 0 ? Math.ceil(miles - total) : 0;
+    const countLine = `<div class="tk-count${n > 0 ? ' ok' : ''}">${own > 0 ? '已有點數＋這次消費' : '這次消費'}合計 ${fmt(Math.floor(total))} 哩：`
+      + (n > 0 ? `<b>可換 ${n} 張</b>，剩餘 ${fmt(Math.floor(rest))} 哩` : `<b>還差 ${fmt(gap)} 哩</b>${r.perMile != null ? `，約需再消費 NT$ ${fmt(Math.ceil(gap * r.perMile - 1e-6))}` : ''}`)
+      + `</div>`;
+    const ownNote = own > 0 ? '<em class="tk-note">實際轉點可能有最低門檻與單位限制（例如每次至少轉 3,000 點、以 500 點為單位），零頭點數不一定能全部轉出。</em>' : '';
+    $('tkResult').innerHTML = `<div class="tk-main">${main}${countLine}${tkNote(a) ? `<em class="tk-note">${tkNote(a)}</em>` : ''}${ownNote}</div>
       <div class="tk-side"><div><small>另付稅金與燃油附加費</small><b>${tax > 0 ? 'NT$ ' + fmt(tax) : '未填寫'}</b></div>
       <div><small>機票</small><b class="tk-label">${label}</b></div></div>`;
   }
@@ -796,7 +835,7 @@ function ticketLine(c, cost, cheapest) {
   if (cost === undefined) cost = costOf(c);
   if (!cost) return `<small class="cmp-ticket off">目標機票：${t.label}・所需 ${fmt(t.miles)} 哩　·　兌換目標不同，不適用</small>`;
   const diff = cheapest != null && cost.total > cheapest ? `<span class="cmp-diff">比最低多 NT$ ${fmt(cost.total - cheapest)}</span>` : '';
-  return `<small class="cmp-ticket"><span class="cmp-tk-label">目標機票：${t.label}・所需 ${fmt(t.miles)} 哩</span>換這張機票的總成本 <b>NT$ ${fmt(cost.total)}</b>${diff}<span class="cmp-ticket-sub">（消費金額 NT$ ${fmt(cost.spend)}＋稅金與燃油附加費 ${cost.tax ? 'NT$ ' + fmt(cost.tax) : '未填寫'}）</span></small>`;
+  return `<small class="cmp-ticket"><span class="cmp-tk-label">目標機票：${t.label}・所需 ${fmt(t.miles)} 哩</span>換這張機票的總成本 <b>NT$ ${fmt(cost.total)}</b>${diff}<span class="cmp-ticket-sub">（${cost.own ? '扣除已有點數後還需消費' : '消費金額'} NT$ ${fmt(cost.spend)}＋稅金與燃油附加費 ${cost.tax ? 'NT$ ' + fmt(cost.tax) : '未填寫'}）</span></small>`;
 }
 (function initTicket() {
   window.__tkReady = true;
@@ -1071,6 +1110,7 @@ function alignToTicket() {
       region === 'overseas' && $('fee').value !== '1.5' ? $('fee').value : '',
       num('bonus') > 0 ? $('bonus').value : '',
       op, tk,
+      num('own') || '',                                          // 10 目前已有點數
     ].map(x => String(x).replace(/[~_]/g, ''));
     while (f.length && f[f.length - 1] === '') f.pop();
     return f.join('~');
@@ -1117,6 +1157,7 @@ function alignToTicket() {
       opMode[n] = (op[4] || '00')[n - 1] === '1' ? 'once' : 'each';
       document.querySelectorAll(`.op-seg[data-row="${n}"] button`).forEach(b => b.classList.toggle('on', b.dataset.m === opMode[n]));
     });
+    $('own').value = fmtN(f[10]);                               // 已有點數：放在 fillPrograms 之後，避免換點數系統時被清空
     syncPickUI(); render();
     return true;
   }
@@ -1127,9 +1168,104 @@ function alignToTicket() {
   $('addCompare').addEventListener('click', () => {
     if (compare.length > preLen) { compare[compare.length - 1].st = captureState(); save(); }
   });
+
+  /* ---- 精簡分享代碼（v1.8.7）----
+     把上面每組「~ 分隔的設定」壓成位元組再轉 base64url，網址變成 ?k=一小段代碼，看起來像縮網址。
+     結構：版本、組數，每組依序為 開頭（c卡片／s點數系統）、欄位旗標、各欄位值；數字用 varint，文字用 UTF-8。
+     目標機票跟前一組相同時只記一個旗標。舊的 ?s=&c= 與 ?cmp= 連結仍可使用。 */
+  const K_VER = 1, CABS = ['y', 'pe', 'c'], FLAG = { o: 1, d: 2, h: 4, 7: 8 };
+  const enc = new TextEncoder(), dec = new TextDecoder();
+  function kEncode(toks) {
+    const out = [];
+    const vi = n => { n = Math.max(0, Math.round(+n || 0)); do { let b = n % 128; n = Math.floor(n / 128); out.push(n > 0 ? b | 128 : b); } while (n > 0); };
+    const st = t => { const b = enc.encode(String(t || '')); vi(b.length); b.forEach(x => out.push(x)); };
+    const dec100 = v => Math.round(parseFloat(v) * 100);
+    // 目前設定與比較區最後一列相同時（加入比較後直接分享的常見情況），只記一個旗標
+    const stateSame = toks.length > 1 && toks[toks.length - 1] === toks[toks.length - 2];
+    if (stateSame) toks = toks.slice(0, -1);
+    vi(K_VER); vi(toks.length * 2 + (stateSame ? 1 : 0));
+    let prevTk = null, prevHead = null;
+    toks.forEach(tok => {
+      const f = String(tok).split('~');
+      const tk = f[9] || '', same = tk && tk === prevTk; prevTk = tk || prevTk;
+      let mask = 0; const on = (i, ok) => { if (ok) mask |= 1 << i; };
+      on(0, f[1]); on(1, f[2] !== undefined && f[2] !== ''); on(2, f[3]); on(3, f[4] && isFinite(parseFloat(f[4])));
+      on(4, f[5]); on(5, f[6] && isFinite(parseFloat(f[6]))); on(6, f[7] && isFinite(parseFloat(f[7]))); on(7, f[8]);
+      on(8, tk && !same); on(9, f[10]); on(10, same); on(11, f[0] === prevHead);
+      vi(mask); if (!(mask & 2048)) st(f[0]); prevHead = f[0];
+      if (mask & 1) st(f[1]);
+      if (mask & 2) vi(+f[2]);
+      if (mask & 4) vi(+f[3]);
+      if (mask & 8) vi(dec100(f[4]));
+      if (mask & 16) vi([...f[5]].reduce((a, c) => a | (FLAG[c] || 0), 0));
+      if (mask & 32) vi(dec100(f[6]));
+      if (mask & 64) vi(dec100(f[7]));
+      if (mask & 128) st(f[8]);
+      if (mask & 256) {
+        const t = tk.split('.');                              // 計畫.航線.艙等.價格等級.行程.稅金[.哩程.航空公司.航段]
+        let m = 0; [1, 2, 3, 4, 5, 6, 7, 8].forEach((i, j) => { if (t[i]) m |= 1 << j; });
+        st(t[0]); vi(m);
+        if (m & 1) vi(+t[1]);
+        if (m & 2) vi(Math.max(0, CABS.indexOf(t[2])));
+        if (m & 4) vi(+t[3]);
+        if (m & 16) vi(+t[5]);
+        if (m & 32) vi(+t[6]);
+        if (m & 64) st(t[7]);
+        if (m & 128) st(t[8]);
+      }
+      if (mask & 512) vi(+f[10]);
+    });
+    let bin = ''; out.forEach(b => { bin += String.fromCharCode(b); });
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function kDecode(code) {
+    try {
+      const bin = atob(String(code).replace(/-/g, '+').replace(/_/g, '/'));
+      const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+      let p = 0;
+      const vi = () => { let n = 0, mul = 1, b; do { if (p >= bytes.length) throw 0; b = bytes[p++]; n += (b & 127) * mul; mul *= 128; } while (b & 128); return n; };
+      const st = () => { const len = vi(); if (p + len > bytes.length) throw 0; const s = dec.decode(bytes.slice(p, p + len)); p += len; return s; };
+      const d100 = n => String(+(n / 100).toFixed(2));
+      if (vi() !== K_VER) return null;
+      const head = vi(), stateSame = head % 2 === 1, count = Math.min(Math.floor(head / 2), MAX + 1), toks = [];
+      let prevTk = '', prevHead = '';
+      for (let r = 0; r < count; r++) {
+        const f = new Array(11).fill('');
+        const mask = vi(); f[0] = mask & 2048 ? prevHead : st(); prevHead = f[0];
+        if (mask & 1) f[1] = st();
+        if (mask & 2) f[2] = String(vi());
+        if (mask & 4) f[3] = String(vi());
+        if (mask & 8) f[4] = d100(vi());
+        if (mask & 16) { const b = vi(); f[5] = Object.keys(FLAG).filter(k => b & FLAG[k]).join(''); }
+        if (mask & 32) f[6] = d100(vi());
+        if (mask & 64) f[7] = d100(vi());
+        if (mask & 128) f[8] = st();
+        if (mask & 256) {
+          const t = new Array(9).fill(''); t[0] = st(); const m = vi();
+          if (m & 1) t[1] = String(vi());
+          if (m & 2) t[2] = CABS[vi()] || 'y';
+          if (m & 4) t[3] = String(vi());
+          if (m & 8) t[4] = '2';
+          if (m & 16) t[5] = String(vi());
+          if (m & 32) t[6] = String(vi());
+          if (m & 64) t[7] = st();
+          if (m & 128) t[8] = st();
+          f[9] = t.join('.').replace(/\.+$/, ''); prevTk = f[9];
+        } else if (mask & 1024) f[9] = prevTk;
+        if (mask & 512) f[10] = String(vi());
+        while (f.length && f[f.length - 1] === '') f.pop();
+        toks.push(f.join('~'));
+      }
+      if (stateSame && toks.length) toks.push(toks[toks.length - 1]);
+      return toks.length ? toks : null;
+    } catch (e) { return null; }
+  }
   // 打開短網址：先依序重算比較區每一列，最後套用目前的設定
   (function loadShortLink() {
-    const q = new URLSearchParams(location.search), sTok = q.get('s'), cTok = q.get('c');
+    const q = new URLSearchParams(location.search);
+    let sTok = q.get('s'), cTok = q.get('c');
+    const kToks = q.get('k') ? kDecode(q.get('k')) : null;          // 精簡代碼：最後一組是目前設定，其餘是比較區
+    if (kToks) { sTok = kToks[kToks.length - 1]; cTok = kToks.length > 1 ? kToks.slice(0, -1).join('_') : null; }
     if (!sTok && !cTok) return;
     if (cTok) {
       const before = compare.slice();
@@ -1152,7 +1288,7 @@ function alignToTicket() {
     renderCompare(); render(); syncRestore();
     try {
       const u = new URL(location.href);
-      ['s', 'c', 'openExternalBrowser', 'from'].forEach(k => u.searchParams.delete(k));
+      ['s', 'c', 'k', 'openExternalBrowser', 'from'].forEach(k => u.searchParams.delete(k));
       history.replaceState(null, '', u.pathname + (u.search || '') + u.hash);
     } catch (e) {}
     setTimeout(() => { const el = $('calc-main'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 350);
@@ -1160,16 +1296,14 @@ function alignToTicket() {
 
   function shareURL() {
     const short = compare.every(c => c.st);
-    const toks = packTickets([...(short ? compare.map(c => c.st) : []), captureState()]);
-    let q = 's=' + encodeURIComponent(toks.pop());
-    if (compare.length) {
-      q += short
-        ? '&c=' + encodeURIComponent(toks.join('_'))
-        : '&cmp=' + encodeCompare(compare);                    // 舊版加入的比較列沒有輸入條件，只能用長格式
+    if (short) {
+      const code = kEncode([...compare.map(c => c.st), captureState()]);
+      return `${location.origin}${location.pathname}?k=${code}`;
     }
-    q += '&openExternalBrowser=1';   // 在 LINE 裡點開時改用手機預設瀏覽器，才能直接分享圖片（其他 App 會忽略這個參數）
-    return `${location.origin}${location.pathname}?${q}`;
+    // 舊版加入的比較列沒有輸入條件，只能用長格式
+    return `${location.origin}${location.pathname}?s=${encodeURIComponent(captureState())}&cmp=${encodeCompare(compare)}`;
   }
+
   function shareText(r) {
     return r && r.ok
       ? `我用卡點遊實算算了一下：${r.label} → ${r.prog.short}，每消費 ${fmt2(r.perMile)} 元 = 1 ${r.unit}。你也來算算看 👉`
