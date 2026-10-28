@@ -797,11 +797,11 @@ function renderTicket() {
     const total = r.miles, n = Math.floor(total / miles + 1e-9), rest = total - n * miles;
     const gap = n === 0 ? Math.ceil(miles - total) : 0;
     const countLine = `<div class="tk-count${n > 0 ? ' ok' : ''}">${own > 0 ? '已有點數＋這次消費' : '這次消費'}合計 ${fmt(Math.floor(total))} 哩：`
-      + (n > 0 ? `<b>可換 ${n} 張</b>，剩餘 ${fmt(Math.floor(rest))} 哩` : `<b>還差 ${fmt(gap)} 哩</b>${r.perMile != null ? `，約需再消費 NT$ ${fmt(Math.ceil(gap * r.perMile - 1e-6))}` : ''}`)
+      + (n > 0 ? `<b>可換 ${n} 張</b>，剩餘 ${fmt(Math.floor(rest))} 哩${n >= 2 && tax > 0 ? `；稅金與燃油附加費每張 NT$ ${fmt(tax)}，${n} 張共 <b>NT$ ${fmt(tax * n)}</b>` : ''}` : `<b>還差 ${fmt(gap)} 哩</b>${r.perMile != null ? `，約需再消費 NT$ ${fmt(Math.ceil(gap * r.perMile - 1e-6))}` : ''}`)
       + `</div>`;
     const ownNote = own > 0 ? '<em class="tk-note">實際轉點可能有最低門檻與單位限制（例如每次至少轉 3,000 點、以 500 點為單位），零頭點數不一定能全部轉出。</em>' : '';
     $('tkResult').innerHTML = `<div class="tk-main">${main}${countLine}${tkNote(a) ? `<em class="tk-note">${tkNote(a)}</em>` : ''}${ownNote}</div>
-      <div class="tk-side"><div><small>另付稅金與燃油附加費</small><b>${tax > 0 ? 'NT$ ' + fmt(tax) : '未填寫'}</b></div>
+      <div class="tk-side"><div><small>另付稅金與燃油附加費（每張）</small><b>${tax > 0 ? 'NT$ ' + fmt(tax) : '未填寫'}</b>${tax > 0 && n >= 2 ? `<small class="tk-tax-n">換 ${n} 張共 NT$ ${fmt(tax * n)}</small>` : ''}</div>
       <div><small>機票</small><b class="tk-label">${label}</b></div></div>`;
   }
   renderCompare();
@@ -835,7 +835,9 @@ function ticketLine(c, cost, cheapest) {
   if (cost === undefined) cost = costOf(c);
   if (!cost) return `<small class="cmp-ticket off">目標機票：${t.label}・所需 ${fmt(t.miles)} 哩　·　兌換目標不同，不適用</small>`;
   const diff = cheapest != null && cost.total > cheapest ? `<span class="cmp-diff">比最低多 NT$ ${fmt(cost.total - cheapest)}</span>` : '';
-  return `<small class="cmp-ticket"><span class="cmp-tk-label">目標機票：${t.label}・所需 ${fmt(t.miles)} 哩</span>換這張機票的總成本 <b>NT$ ${fmt(cost.total)}</b>${diff}<span class="cmp-ticket-sub">（${cost.own ? '扣除已有點數後還需消費' : '消費金額'} NT$ ${fmt(cost.spend)}＋稅金與燃油附加費 ${cost.tax ? 'NT$ ' + fmt(cost.tax) : '未填寫'}）</span></small>`;
+  const n = Math.floor(c.miles / t.miles + 1e-9);               // 可換幾張：稅金與燃油附加費每張都要付
+  const multi = n >= 2 && cost.tax ? `<span class="cmp-ticket-multi">可換 ${n} 張，稅金與燃油附加費每張 NT$ ${fmt(cost.tax)}，${n} 張共 NT$ ${fmt(cost.tax * n)}</span>` : '';
+  return `<small class="cmp-ticket"><span class="cmp-tk-label">目標機票：${t.label}・所需 ${fmt(t.miles)} 哩</span>換這張機票的總成本 <b>NT$ ${fmt(cost.total)}</b>${diff}<span class="cmp-ticket-sub">（${cost.own ? '扣除已有點數後還需消費' : '消費金額'} NT$ ${fmt(cost.spend)}＋稅金與燃油附加費 ${cost.tax ? 'NT$ ' + fmt(cost.tax) + '（一張）' : '未填寫'}）</span>${multi}</small>`;
 }
 (function initTicket() {
   window.__tkReady = true;
@@ -1494,7 +1496,7 @@ function alignToTicket() {
         ty += 70; ctx.fillStyle = C.cream; ctx.font = `700 60px ${NUM}`; ctx.fillText(`NT$ ${fmt(tkSpend)}`, 130, ty);
         ctx.fillStyle = 'rgba(246,242,223,.8)'; ctx.font = `500 ${tl.size}px ${TC}`;
         ty += 12; tl.lines.forEach(l => { ty += 34; ctx.fillText(l, 130, ty); });
-        if (ticket.tax) { ty += 38; ctx.fillStyle = C.soft; ctx.font = `400 22px ${TC}`; ctx.fillText(`另付稅金與燃油附加費 NT$ ${fmt(ticket.tax)}・所需 ${fmt(ticket.miles)} 哩`, 130, ty); }
+        if (ticket.tax) { ty += 38; ctx.fillStyle = C.soft; ctx.font = `400 22px ${TC}`; ctx.fillText(`另付稅金與燃油附加費 NT$ ${fmt(ticket.tax)}（每張）・所需 ${fmt(ticket.miles)} 哩`, 130, ty); }
         y = top + h;
       }
       return y;

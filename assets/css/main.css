@@ -456,3 +456,7 @@ section[id],.system-card[id]{scroll-margin-top:84px}
 .tk-main .tk-count{margin-top:12px;padding:8px 12px;border:1px solid #c7a45a55;background:#ffffff0d;font-size:14px;line-height:1.6;color:#dfe8e0}
 .tk-main .tk-count b{color:var(--goldlite)}
 .tk-main .tk-count.ok{border-color:#c7a45a;background:#c7a45a1f}
+
+/* v1.8.8 稅金與燃油附加費：可換多張時顯示總額 */
+.tk-side .tk-tax-n{display:block;margin-top:4px;font-size:13px;color:var(--goldlite)}
+.cmp-ticket .cmp-ticket-multi{display:block;margin-top:2px;font-size:12px;color:#8e713b}
